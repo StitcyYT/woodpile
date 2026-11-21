@@ -1,148 +1,235 @@
 #include "panic.h"
 #include "framebuffer.h"
+#include "serial.h"
 
 #define VGA_ADDR    ((volatile uint16_t *)0xB8000)
 #define VGA_COLS    80
 #define VGA_ROWS    25
 
-#define BS_ART_COLS 8
-#define BS_ART_ROWS 6
+#define LINE_MAX    128
+#define RULE_LEN    88
 
-static const char *bs_art[BS_ART_ROWS] = {
-    "      __",
-    " _   / /",
-    "(_) | | ",
-    " _  | | ",
-    "(_) | | ",
-    "     \\_\\ ",
-};
+/* 0 = no panic, 1 = full panic writer running, 2 = severe writer / halted. */
+static volatile int panic_state;
 
 static int str_len(const char *s) {
     int n = 0;
+    if (!s) return 0;
     while (s[n]) n++;
     return n;
 }
 
-static void append(char *buf, int *i, const char *s) {
-    while (*s) buf[(*i)++] = *s++;
+static void append(char *buf, int *pos, int cap, const char *s) {
+    if (!s) return;
+    while (*s && *pos < cap - 1)
+        buf[(*pos)++] = *s++;
+    buf[*pos] = 0;
 }
 
-static void u32_hex(char *out, uint32_t v) {
-    const char *h = "0123456789ABCDEF";
-    for (int i = 0; i < 8; i++) {
-        out[7 - i] = h[v & 0xF];
-        v >>= 4;
-    }
-    out[8] = 0;
+static void append_char(char *buf, int *pos, int cap, char c) {
+    if (*pos < cap - 1)
+        buf[(*pos)++] = c;
+    buf[*pos] = 0;
 }
 
-static void u64_hex(char *out, uint64_t v) {
-    const char *h = "0123456789ABCDEF";
-    for (int i = 0; i < 16; i++) {
-        out[15 - i] = h[v & 0xF];
-        v >>= 4;
+static void fill_char(char *buf, int *pos, int cap, char c, int count) {
+    while (count-- > 0 && *pos < cap - 1)
+        buf[(*pos)++] = c;
+    buf[*pos] = 0;
+}
+
+static void hex_fixed(char *out, uint64_t v, int digits) {
+    static const char h[] = "0123456789ABCDEF";
+    if (digits < 1 || digits > 16) digits = 16;
+    out[digits] = 0;
+    for (int i = digits - 1; i >= 0; i--) {
+        out[i] = h[(v >> ((digits - 1 - i) * 4)) & 0xF];
     }
-    out[16] = 0;
+}
+
+static void build_full_lines(const char *reason, uint32_t code, uint64_t dump,
+                             char header[LINE_MAX],
+                             char dump_line[LINE_MAX],
+                             char reason_line[LINE_MAX],
+                             char rule[LINE_MAX]) {
+    (void)code;
+    int n = 0;
+    fill_char(rule, &n, LINE_MAX, '-', RULE_LEN);
+
+    n = 0;
+    append(header, &n, LINE_MAX, "kernel panic!");
+    while (n < 24) append_char(header, &n, LINE_MAX, ' ');
+    while (n < RULE_LEN) append_char(header, &n, LINE_MAX, '-');
+
+    char hbuf[17];
+    n = 0;
+    append(dump_line, &n, LINE_MAX, "dump:0x");
+    hex_fixed(hbuf, dump, 16);
+    append(dump_line, &n, LINE_MAX, hbuf);
+
+    n = 0;
+    append(reason_line, &n, LINE_MAX, "reason: ");
+    append(reason_line, &n, LINE_MAX, reason ? reason : "unknown");
+}
+
+static void build_severe_lines(const char *reason, uint32_t code, uint64_t dump,
+                               char l1[LINE_MAX], char l2[LINE_MAX],
+                               char l3[LINE_MAX], char l4[LINE_MAX],
+                               char l5[LINE_MAX]) {
+    int n = 0;
+    append(l1, &n, LINE_MAX, "[!] kernel panic");
+
+    char hbuf[17];
+    n = 0;
+    append(l2, &n, LINE_MAX, "dump:0x");
+    hex_fixed(hbuf, dump, 16);
+    append(l2, &n, LINE_MAX, hbuf);
+
+    n = 0;
+    append(l3, &n, LINE_MAX, "ah=0x");
+    hex_fixed(hbuf, code & 0xFF, 2);
+    append(l3, &n, LINE_MAX, hbuf);
+    append(l3, &n, LINE_MAX, " --------");
+
+    n = 0;
+    append(l4, &n, LINE_MAX, "reason: ");
+    append(l4, &n, LINE_MAX, reason ? reason : "unknown");
+
+    n = 0;
+    append(l5, &n, LINE_MAX, "kernel panic [!]");
+}
+
+static void serial_lines(char *a, char *b, char *c, char *d, char *e) {
+    char *lines[5] = { a, b, c, d, e };
+    for (int i = 0; i < 5; i++) {
+        if (!lines[i] || !lines[i][0]) continue;
+        serial_puts(lines[i]);
+        serial_puts("\n");
+    }
 }
 
 static void vga_putstr(int row, int col, const char *s) {
-    for (int i = 0; s[i] && (col + i) < VGA_COLS; i++)
-        VGA_ADDR[row * VGA_COLS + col + i] = 0x1F00 | (unsigned char)s[i];
+    if (row < 0 || row >= VGA_ROWS) return;
+    for (int i = 0; s[i] && (col + i) < VGA_COLS; i++) {
+        int c = col + i;
+        if (c < 0) continue;
+        VGA_ADDR[row * VGA_COLS + c] = 0x0F00 | (unsigned char)s[i];
+    }
 }
 
-static void vga_centered(int row, const char *s) {
-    int col = (VGA_COLS - str_len(s)) / 2;
-    if (col < 0) col = 0;
-    vga_putstr(row, col, s);
-}
-
-static void vga_bluescreen(const char *name, uint32_t err, uint64_t rip) {
+static void vga_clear(void) {
     for (int i = 0; i < VGA_COLS * VGA_ROWS; i++)
-        VGA_ADDR[i] = 0x1F00 | ' ';
-
-    for (int r = 0; r < BS_ART_ROWS; r++)
-        vga_putstr(5 + r, (VGA_COLS - BS_ART_COLS) / 2, bs_art[r]);
-
-    vga_centered(12, "KERNEL PANIC");
-
-    char line[64];
-    char hbuf[20];
-    int i = 0;
-    append(line, &i, "EXCEPTION: ");
-    append(line, &i, name);
-    line[i] = 0;
-    vga_centered(14, line);
-
-    i = 0;
-    append(line, &i, "ERR=0x");
-    u32_hex(hbuf, err);
-    append(line, &i, hbuf);
-    line[i] = 0;
-    vga_centered(15, line);
-
-    i = 0;
-    append(line, &i, "RIP=0x");
-    u64_hex(hbuf, rip);
-    append(line, &i, hbuf);
-    line[i] = 0;
-    vga_centered(16, line);
-
-    vga_centered(18, "SYSTEM HALTED");
+        VGA_ADDR[i] = 0x0F00 | ' ';
 }
 
-static void fb_bluescreen(const char *name, uint32_t err, uint64_t rip) {
-    unsigned int blue  = fb_color(0x00, 0x00, 0xAA);
-    unsigned int white = fb_color(0xFF, 0xFF, 0xFF);
-    int w = fb_width();
-    int h = fb_height();
-
-    fb_clear(blue);
-
-    int art_x = (w - BS_ART_COLS * 8) / 2;
-    if (art_x < 0) art_x = 0;
-    int y = (h - (BS_ART_ROWS * 16 + 16 + 16 + 16 + 3 * 16)) / 2;
-    if (y < 0) y = 0;
-
-    for (int r = 0; r < BS_ART_ROWS; r++)
-        fb_drawstr(art_x, y + r * 16, bs_art[r], white, blue);
-    y += BS_ART_ROWS * 16 + 16;
-
-    char line[64];
-    char hbuf[20];
-    int i = 0;
-    append(line, &i, "KERNEL PANIC");
-    line[i] = 0;
-    fb_drawstr((w - i * 8) / 2, y, line, white, blue);
-    y += 16 + 16;
-
-    i = 0;
-    append(line, &i, "EXCEPTION: ");
-    append(line, &i, name);
-    line[i] = 0;
-    fb_drawstr((w - i * 8) / 2, y, line, white, blue);
-    y += 16;
-
-    i = 0;
-    append(line, &i, "ERR=0x");
-    u32_hex(hbuf, err);
-    append(line, &i, hbuf);
-    line[i] = 0;
-    fb_drawstr((w - i * 8) / 2, y, line, white, blue);
-    y += 16;
-
-    i = 0;
-    append(line, &i, "RIP=0x");
-    u64_hex(hbuf, rip);
-    append(line, &i, hbuf);
-    line[i] = 0;
-    fb_drawstr((w - i * 8) / 2, y, line, white, blue);
+static void vga_full(char *rule, char *header, char *dump_line,
+                     char *reason_line) {
+    vga_clear();
+    vga_putstr(0, 0, rule);
+    vga_putstr(2, 0, header);
+    vga_putstr(4, 0, dump_line);
+    vga_putstr(5, 0, reason_line);
+    vga_putstr(7, 0, rule);
 }
 
-void panic(const char *exc_name, uint32_t err_code, uint64_t rip) {
+static void vga_severe(char *l1, char *l2, char *l3, char *l4, char *l5) {
+    vga_clear();
+    vga_putstr(1, 0, l1);
+    vga_putstr(3, 0, l2);
+    vga_putstr(4, 0, l3);
+    vga_putstr(5, 0, l4);
+    vga_putstr(7, 0, l5);
+}
+
+static void fb_rule(int y, unsigned int dim, unsigned int bg,
+                    const char *rule) {
+    int cols = fb_width() / 8;
+    int x = 8;
+    while (cols > 0 && x < fb_width()) {
+        int take = cols < RULE_LEN ? cols : RULE_LEN;
+        char buf[LINE_MAX];
+        int n = 0;
+        while (n < take && n < LINE_MAX - 1)
+            buf[n++] = rule[n];
+        buf[n] = 0;
+        fb_drawstr(x, y, buf, dim, bg);
+        x += n * 8;
+        cols -= n;
+        if (n <= 0) break;
+    }
+}
+
+static void fb_full(char *rule, char *header, char *dump_line,
+                    char *reason_line) {
+    unsigned int bg = fb_color(0x00, 0x00, 0x00);
+    unsigned int fg = fb_color(0xFF, 0xFF, 0xFF);
+    unsigned int dim = fb_color(0x80, 0x80, 0x80);
+    unsigned int red = fb_color(0xFF, 0x50, 0x50);
+
+    fb_clear(bg);
+    fb_rule(16, dim, bg, rule);
+    fb_drawstr(8, 48, header, red, bg);
+    fb_drawstr(8, 80, dump_line, fg, bg);
+    fb_drawstr(8, 104, reason_line, fg, bg);
+    fb_rule(136, dim, bg, rule);
+}
+
+static void fb_severe(char *l1, char *l2, char *l3, char *l4, char *l5) {
+    /* Minimal overlay: no fullscreen clear, just enough text to be seen if
+     * the framebuffer still works.  Serial output is already on its way. */
+    unsigned int bg = fb_color(0x00, 0x00, 0x00);
+    unsigned int fg = fb_color(0xFF, 0xFF, 0xFF);
+    unsigned int red = fb_color(0xFF, 0x50, 0x50);
+
+    fb_rect(0, 0, fb_width(), 6 * 16, bg);
+    fb_drawstr(8, 8, l1, red, bg);
+    fb_drawstr(8, 32, l2, fg, bg);
+    fb_drawstr(8, 56, l3, fg, bg);
+    fb_drawstr(8, 80, l4, fg, bg);
+    fb_drawstr(8, 104, l5, red, bg);
+}
+
+static void halt_forever(void) {
+    for (;;) __asm__ volatile ("hlt");
+}
+
+void panic_severe(const char *reason, uint32_t code, uint64_t dump) {
     __asm__ volatile ("cli");
-    if (fb_ready())
-        fb_bluescreen(exc_name, err_code, rip);
+    if (panic_state == 2) halt_forever();
+    panic_state = 2;
+
+    char l1[LINE_MAX], l2[LINE_MAX], l3[LINE_MAX], l4[LINE_MAX], l5[LINE_MAX];
+    build_severe_lines(reason, code, dump, l1, l2, l3, l4, l5);
+
+    /* Serial first: even a broken framebuffer or VGA text buffer cannot hide
+     * the panic from a QEMU/com0 capture. */
+    serial_lines(l1, l2, l3, l4, l5);
+    if (fb_usable())
+        fb_severe(l1, l2, l3, l4, l5);
+    vga_severe(l1, l2, l3, l4, l5);
+    halt_forever();
+}
+
+void panic(const char *reason, uint32_t code, uint64_t dump) {
+    __asm__ volatile ("cli");
+    if (panic_state) {
+        /* A fault inside the panic writer means the situation is severe:
+         * drop to the tiny serial-first format and never touch video again. */
+        panic_severe(reason, code, dump);
+        return;
+    }
+    panic_state = 1;
+
+    char rule[LINE_MAX], header[LINE_MAX], dump_line[LINE_MAX];
+    char reason_line[LINE_MAX];
+    build_full_lines(reason, code, dump, header, dump_line, reason_line, rule);
+
+    serial_lines(rule, header, dump_line, reason_line, rule);
+    if (fb_usable())
+        fb_full(rule, header, dump_line, reason_line);
     else
-        vga_bluescreen(exc_name, err_code, rip);
-    while (1) { __asm__ volatile ("hlt"); }
+        vga_full(rule, header, dump_line, reason_line);
+
+    panic_state = 2;
+    halt_forever();
 }

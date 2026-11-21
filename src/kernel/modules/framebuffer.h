@@ -21,6 +21,7 @@ enum {
 void framebuffer_init(struct vbe_result *vbe);
 unsigned int fb_color(unsigned char r, unsigned char g, unsigned char b);
 int fb_ready(void);
+int fb_usable(void);
 int fb_width(void);
 int fb_height(void);
 void fb_putpixel(int x, int y, unsigned int color);

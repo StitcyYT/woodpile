@@ -25,6 +25,19 @@ static const char *exc_names[] = {
     "MF", "AC", "MC", "XF", "VE", "CP", "HV", "VC",
     "SX", "WX", "??", "??", "??", "??", "S?" };
 
+static const char *exc_reasons[] = {
+    "division by zero", "debug trap", "non-maskable interrupt", "breakpoint",
+    "overflow", "bound range exceeded", "invalid opcode", "no math coprocessor",
+    "double fault", "coprocessor segment overrun", "invalid task state",
+    "segment not present", "stack segment fault", "general protection fault",
+    "page fault", "reserved exception", "floating point error",
+    "alignment check", "machine check", "SIMD floating point error",
+    "virtualization exception", "control protection exception",
+    "hypervisor injection exception", "VMM communication exception",
+    "security exception", "unknown exception", "unknown exception",
+    "unknown exception", "unknown exception", "unknown exception",
+    "unknown exception", "unknown exception" };
+
 static void exc_handler(regs_t *r) {
     uint64_t cr2;
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
@@ -40,11 +53,19 @@ static void exc_handler(regs_t *r) {
     serial_puthex(cr2);
     serial_puts("\n");
 
-    panic((r->int_no < 32) ? exc_names[r->int_no] : "UNKNOWN", r->err_code, r->rip);
+    const char *reason = (r->int_no < 32) ? exc_reasons[r->int_no]
+                                          : "unknown exception";
+    /* A double fault or stack fault may mean the stack/context is broken;
+     * skip the full framebuffer painter and use the tiny serial-first path. */
+    if (r->int_no == 8 || r->int_no == 12)
+        panic_severe(reason, r->err_code, r->rip);
+
+    /* For a page fault the faulting address is the most useful dump value. */
+    uint64_t dump = (r->int_no == 14) ? cr2 : r->rip;
+    panic(reason, r->err_code, dump);
 }
 
 void isr_handler(regs_t *r) {
-    serial_puts("x");
     exc_handler(r);
 }
 

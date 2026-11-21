@@ -4,6 +4,7 @@
 
 static unsigned int *fb;
 static int fb_w, fb_h, fb_pitch;
+static int fb_valid;
 static int cx, cy;
 static int fb_rp = 16, fb_gp = 8, fb_bp = 0;
 
@@ -22,7 +23,10 @@ void framebuffer_init(struct vbe_result *vbe) {
         fb_rp = vbe->red_pos;
         fb_gp = vbe->green_pos;
         fb_bp = vbe->blue_pos;
+        fb_valid = 1;
     } else {
+        /* Keep a plausible geometry for the normal console, but do not let
+         * the panic writer touch this guessed address: it may not be mapped. */
         fb = (unsigned int *)0xFD000000;
         fb_w = 1920;
         fb_h = 1080;
@@ -30,6 +34,7 @@ void framebuffer_init(struct vbe_result *vbe) {
         fb_rp = 16;
         fb_gp = 8;
         fb_bp = 0;
+        fb_valid = 0;
     }
     cx = 0;
     cy = 0;
@@ -49,6 +54,13 @@ unsigned int fb_getpixel(int x, int y) {
 
 int fb_ready(void) {
     return fb != 0;
+}
+
+/* True only when VBE gave us a real, mapped linear framebuffer.  Panic uses
+ * this instead of fb_ready() so a failed VBE setup never causes a write to a
+ * guessed address. */
+int fb_usable(void) {
+    return fb_valid && fb != 0;
 }
 
 int fb_width(void) {
