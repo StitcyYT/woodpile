@@ -32,6 +32,7 @@ OBJS = $(BUILD)/entry.o $(BUILD)/start.o $(BUILD)/vga_testing.o $(BUILD)/font.o 
 XECS = $(BUILD)/qnt.xec $(BUILD)/tbi.xec $(BUILD)/lid.xec \
        $(BUILD)/rmf.xec $(BUILD)/inf.xec $(BUILD)/less.xec \
        $(BUILD)/rplay.xec
+QNT_CORE_OBJ = $(BUILD)/qnt_core.o
 RPLAY_SRC ?= $(HOME)/Documents/Codex/2026-10-23/what-x20
 MEDIA = $(BUILD)/media
 INITRD = $(BUILD)/initrd
@@ -42,8 +43,10 @@ X8_GAMES = $(BUILD)/games/snake.xec $(BUILD)/games/pong.xec
 X8_PROGS = $(BUILD)/progs/paint.xec $(BUILD)/progs/notepad.xec \
            $(BUILD)/progs/term.xec
 X8_XECS = $(BUILD)/x8.xec $(X8_GAMES) $(X8_PROGS)
-X8_LIB_SRCS = $(X8_SRC)/x8.c $(X8_SRC)/x8_winapi.c $(X8_SRC)/x8_cursor.c
-X8_LIB_OBJS = $(BUILD)/x8.o $(BUILD)/x8_winapi.o $(BUILD)/x8_cursor.o
+X8_LIB_SRCS = $(X8_SRC)/x8.c $(X8_SRC)/x8_winapi.c $(X8_SRC)/x8_cursor.c \
+              $(X8_SRC)/x8_shell.c
+X8_LIB_OBJS = $(BUILD)/x8.o $(BUILD)/x8_winapi.o $(BUILD)/x8_cursor.o \
+              $(BUILD)/x8_shell.o
 X8_CURSORS = $(wildcard assets/cursors/*)
 X8_ICONS = $(wildcard assets/icons/*.ico)
 
@@ -145,21 +148,24 @@ $(BUILD)/kernel.bin: $(BUILD)/kernel_raw.bin $(BUILD)/initramfs.bin
 	echo "patched initramfs ptr=0x$$(printf '%x' $$IRAMFS_ADDR) size=$$IRAMFS_SIZE lba=$$IRAMFS_LBA"
 
 # ---- .xec commands: flat binaries with an XEC1 header ----
+$(QNT_CORE_OBJ): $(SRC)/xec/qnt_core.c $(SRC)/xec/qnt_core.h $(SRC)/xec/xecabi.h
+	$(CC) $(XEC_CFLAGS) $< -o $@
+
 define XEC_RULE
 $(BUILD)/$(1).xec: $(SRC)/xec/$(1).c $(SRC)/xec/abi_stubs.S $(SRC)/xec/util.c \
                    $(SRC)/xec/inflate.c $(SRC)/xec/inflate.h \
-                   $(SRC)/xec/xecabi.h $(SRC)/xec/xec.ld tools/elf2xec.py
+                   $(SRC)/xec/xecabi.h $(SRC)/xec/xec.ld tools/elf2xec.py $(3)
 	$(CC) $(XEC_CFLAGS) $$< -o $(BUILD)/$(1)_cmd.o
 	$(CC) $(XEC_CFLAGS) $(SRC)/xec/util.c -o $(BUILD)/$(1)_util.o
 	$(CC) $(XEC_CFLAGS) $(SRC)/xec/inflate.c -o $(BUILD)/$(1)_inflate.o
 	$(CC) $(XEC_AFLAGS) $(SRC)/xec/abi_stubs.S -o $(BUILD)/$(1)_abi.o
 	$(LD) -T $(SRC)/xec/xec.ld --defsym XEC_BASE=$(2) -o $(BUILD)/$(1).elf \
-	    $(BUILD)/$(1)_abi.o $(BUILD)/$(1)_cmd.o $(BUILD)/$(1)_util.o \
+	    $(BUILD)/$(1)_abi.o $(BUILD)/$(1)_cmd.o $(3) $(BUILD)/$(1)_util.o \
 	    $(BUILD)/$(1)_inflate.o
 	python3 tools/elf2xec.py $(BUILD)/$(1).elf $$@ $(2)
 endef
 
-$(eval $(call XEC_RULE,qnt,0x900000))
+$(eval $(call XEC_RULE,qnt,0x900000,$(QNT_CORE_OBJ)))
 $(eval $(call XEC_RULE,tbi,0x910000))
 $(eval $(call XEC_RULE,lid,0x920000))
 $(eval $(call XEC_RULE,rmf,0x930000))
@@ -182,8 +188,13 @@ $(BUILD)/x8_cursor.o: $(X8_SRC)/x8_cursor.c $(X8_SRC)/x8_cursor.h \
                       $(X8_SRC)/x8.h $(SRC)/xec/xecabi.h
 	$(CC) $(XEC_CFLAGS) $< -o $@
 
+$(BUILD)/x8_shell.o: $(X8_SRC)/x8_shell.c $(X8_SRC)/x8_shell.h \
+                     $(X8_SRC)/x8_winapi.h $(X8_SRC)/x8_cursor.h \
+                     $(X8_SRC)/x8.h $(SRC)/xec/xecabi.h
+	$(CC) $(XEC_CFLAGS) $< -o $@
+
 define X8_XEC_RULE
-$(1): $(2) $(X8_LIB_OBJS) $(SRC)/xec/abi_stubs.S $(SRC)/xec/util.c \
+$(1): $(2) $(X8_LIB_OBJS) $(5) $(SRC)/xec/abi_stubs.S $(SRC)/xec/util.c \
       $(SRC)/xec/inflate.c $(SRC)/xec/inflate.h \
       $(SRC)/xec/xecabi.h $(SRC)/xec/xec.ld tools/elf2xec.py | $(dir $(1))
 	$(CC) $(XEC_CFLAGS) $(2) -o $(BUILD)/$(4)_cmd.o
@@ -191,7 +202,7 @@ $(1): $(2) $(X8_LIB_OBJS) $(SRC)/xec/abi_stubs.S $(SRC)/xec/util.c \
 	$(CC) $(XEC_CFLAGS) $(SRC)/xec/inflate.c -o $(BUILD)/$(4)_inflate.o
 	$(CC) $(XEC_AFLAGS) $(SRC)/xec/abi_stubs.S -o $(BUILD)/$(4)_abi.o
 	$(LD) -T $(SRC)/xec/xec.ld --defsym XEC_BASE=$(3) -o $(BUILD)/$(4).elf \
-	    $(BUILD)/$(4)_abi.o $(BUILD)/$(4)_cmd.o $(X8_LIB_OBJS) \
+	    $(BUILD)/$(4)_abi.o $(BUILD)/$(4)_cmd.o $(X8_LIB_OBJS) $(5) \
 	    $(BUILD)/$(4)_util.o $(BUILD)/$(4)_inflate.o
 	python3 tools/elf2xec.py $(BUILD)/$(4).elf $(1) $(3)
 endef
@@ -204,7 +215,7 @@ $(eval $(call X8_XEC_RULE,$(BUILD)/games/snake.xec,$(X8_SRC)/games/snake.c,0x980
 $(eval $(call X8_XEC_RULE,$(BUILD)/games/pong.xec,$(X8_SRC)/games/pong.c,0x990000,pong))
 $(eval $(call X8_XEC_RULE,$(BUILD)/progs/paint.xec,$(X8_SRC)/progs/paint.c,0x9A0000,paint))
 $(eval $(call X8_XEC_RULE,$(BUILD)/progs/notepad.xec,$(X8_SRC)/progs/notepad.c,0x9B0000,notepad))
-$(eval $(call X8_XEC_RULE,$(BUILD)/progs/term.xec,$(X8_SRC)/progs/term.c,0x1500000,term))
+$(eval $(call X8_XEC_RULE,$(BUILD)/progs/term.xec,$(X8_SRC)/progs/term.c,0x1500000,term,$(QNT_CORE_OBJ)))
 
 # ---- PLAY3 media: keep every container playable via raw conversion ----
 $(MEDIA): tools/rplay_prep.py

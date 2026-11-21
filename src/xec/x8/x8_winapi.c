@@ -1,4 +1,5 @@
 #include "x8_winapi.h"
+#include "x8_shell.h"
 
 void x8_window_init(x8_window_t *win, int x, int y, int w, int h,
                     const char *title, const char *menu, int flags) {
@@ -152,13 +153,18 @@ void x8_desktop_restore_rect(int x, int y, int w, int h) {
     }
 }
 
-void x8_desktop_background(void) {
+void x8_desktop_fill(void) {
     int sw = gfx_width(), sh = gfx_height();
     x8_desktop_restore_rect(0, 24, sw, sh - 52);
     x8_fill(0, 0, sw, 24, X8_WIN_WHITE);
     x8_hline(0, 23, sw, X8_WIN_BLACK);
-    x8_status_bar(sh - 28, 28,
-                  "Click an icon to launch  -  Esc to exit X8  -  PS/2 mouse active");
+}
+
+void x8_desktop_background(void) {
+    /* Redraw the whole X8 background, including the Program Manager window
+     * that is still alive behind the current app.  Painting only the checker
+     * here used to erase every other window on the screen. */
+    x8_shell_draw(-1, 0);
 }
 
 void x8_drag_init(x8_drag_t *d) {

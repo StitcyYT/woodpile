@@ -1,24 +1,28 @@
 #include "../x8.h"
 #include "../x8_winapi.h"
 #include "../x8_cursor.h"
+#include "../../qnt_core.h"
 
 #define MAX_ROWS 32
 #define MAX_COLS 96
-#define PROMPT   "root ~# "
 
 static x8_cursor_t cursor;
 static x8_window_t win;
 static x8_drag_t win_drag;
 
 static char lines[MAX_ROWS][MAX_COLS + 1];
+static unsigned int line_color[MAX_ROWS][MAX_COLS];
 static int line_count = 1;
-static char input[MAX_COLS + 1];
-static int input_len;
+static int line_open = 1;
+static int input_start;
 static int rows_visible, cols_visible;
 static int caret_on;
-static char status_text[96] = "Enter help  -  Esc exit  -  drag title bar to move";
-static int status_dirty;
+static unsigned int cur_color;
+static int rainbow;
+static int rainbow_pos;
 static int full_redraw;
+static int clear_requested;
+static char status_text[96] = "qnt shell  -  Esc exit  -  drag title bar to move";
 
 static void recompute(void) {
     x8_rect_t c;
@@ -38,9 +42,155 @@ static void setup_window(void) {
     if (w < 480) w = 480;
     if (h < 360) h = 360;
     x8_window_init(&win, (sw - w) / 2, (sh - h) / 2, w, h,
-                   "Terminal", "File  Edit  Help", X8_WF_CLOSE | X8_WF_MENU);
+                   "Terminal - qnt", "File  Edit  Help",
+                   X8_WF_CLOSE | X8_WF_MENU);
     recompute();
 }
+
+static void push_line(void) {
+    if (line_count >= MAX_ROWS) {
+        for (int row = 0; row < MAX_ROWS - 1; row++) {
+            mem_copy(lines[row], lines[row + 1], MAX_COLS + 1);
+            mem_copy(line_color[row], line_color[row + 1],
+                     sizeof(line_color[row]));
+        }
+        line_count = MAX_ROWS;
+    } else {
+        line_count++;
+    }
+    lines[line_count - 1][0] = '\0';
+    line_open = 1;
+}
+
+static unsigned int palette_color(int i) {
+    static const unsigned char rgb[8][3] = {
+        {255, 80, 80}, {255, 180, 60}, {255, 255, 80}, {80, 220, 90},
+        {80, 220, 255}, {100, 140, 255}, {210, 100, 255}, {255, 120, 190}
+    };
+    i &= 7;
+    return x8_color(rgb[i][0], rgb[i][1], rgb[i][2]);
+}
+
+static void append_char(int ch) {
+    if (ch == '\r') return;
+    if (ch == '\n' || ch == '\b') {
+        push_line();
+        return;
+    }
+
+    int row = line_count - 1;
+    int len = (int)str_len(lines[row]);
+    if (len >= cols_visible || len >= MAX_COLS) {
+        push_line();
+        row = line_count - 1;
+        len = 0;
+    }
+
+    unsigned int color = cur_color;
+    if (rainbow) color = palette_color(rainbow_pos++);
+
+    lines[row][len] = (char)ch;
+    lines[row][len + 1] = '\0';
+    line_color[row][len] = color;
+}
+
+/* The token between ':' and '|' is not NUL-terminated, so compare it by
+ * length instead of using str_eq(). */
+static int token_eq(const char *s, int len, const char *literal) {
+    int i = 0;
+    for (; i < len && literal[i]; i++)
+        if (s[i] != literal[i]) return 0;
+    return i == len && literal[i] == '\0';
+}
+
+static void set_markup_color(const char *name, int len) {
+    rainbow = 0;
+    if (token_eq(name, len, "WHITE")) {
+        cur_color = X8_WIN_WHITE;
+    } else if (token_eq(name, len, "BLACK")) {
+        cur_color = X8_WIN_BLACK;
+    } else if (token_eq(name, len, "RED")) {
+        cur_color = x8_color(255, 90, 90);
+    } else if (token_eq(name, len, "GREEN")) {
+        cur_color = x8_color(90, 230, 120);
+    } else if (token_eq(name, len, "BLUE")) {
+        cur_color = x8_color(120, 160, 255);
+    } else if (token_eq(name, len, "CYAN")) {
+        cur_color = x8_color(90, 230, 230);
+    } else if (token_eq(name, len, "MAGENTA")) {
+        cur_color = x8_color(230, 110, 230);
+    } else if (token_eq(name, len, "YELLOW")) {
+        cur_color = x8_color(255, 230, 100);
+    } else if (token_eq(name, len, "GRAY")) {
+        cur_color = x8_color(170, 170, 170);
+    } else if (token_eq(name, len, "TEAL")) {
+        cur_color = x8_color(80, 200, 180);
+    } else if (token_eq(name, len, "RAINBOW")) {
+        rainbow = 1;
+        cur_color = X8_WIN_WHITE;
+    }
+}
+
+static void gui_puts(const char *s, void *ctx) {
+    (void)ctx;
+    if (!s) return;
+
+    while (*s) {
+        if (s[0] == '\\' && s[1] == 'c' && s[2] == ':') {
+            const char *end = s + 3;
+            while (*end && *end != '|') end++;
+            if (*end == '|') {
+                set_markup_color(s + 3, (int)(end - (s + 3)));
+                s = end + 1;
+                continue;
+            }
+        }
+        append_char(*s++);
+    }
+    full_redraw = 1;
+}
+
+static void gui_putc(int c, void *ctx) {
+    (void)ctx;
+    append_char(c);
+    full_redraw = 1;
+}
+
+static void gui_clear(void *ctx) {
+    (void)ctx;
+    line_count = 1;
+    line_open = 1;
+    lines[0][0] = '\0';
+    input_start = 0;
+    clear_requested = 1;
+    full_redraw = 1;
+}
+
+static void gui_flush(void *ctx) {
+    (void)ctx;
+}
+
+static int gui_run(const char *path, const xec_args_t *args, void *ctx) {
+    (void)ctx;
+    x8_cursor_hide();
+    /* TTY commands need the text console; GUI children enter it themselves. */
+    gfx_leave();
+    int rc = xec_run(path, args);
+    gfx_enter();
+    x8_flush_keys();
+    recompute();
+    full_redraw = 1;
+    return rc;
+}
+
+static const qnt_io_t gui_io = {
+    .puts  = gui_puts,
+    .putc  = gui_putc,
+    .clear = gui_clear,
+    .flush = gui_flush,
+    .run   = gui_run,
+    .ctx   = 0
+};
 
 static void draw_row(int row) {
     x8_rect_t c;
@@ -49,17 +199,19 @@ static void draw_row(int row) {
     x8_fill(c.x + 4, y, c.w - 8, 16, X8_WIN_BLACK);
     if (y + 16 > c.y + c.h - 24) return;
 
-    if (row == line_count - 1) {
-        int px = c.x + 8;
-        x8_text(px, y, PROMPT, x8_color(90, 230, 120), X8_WIN_BLACK);
-        px += x8_text_width(PROMPT);
-        x8_text(px, y, input, X8_WIN_WHITE, X8_WIN_BLACK);
-        px += x8_text_width(input);
-        if (caret_on)
-            x8_text(px, y, "_", X8_WIN_WHITE, X8_WIN_BLACK);
-    } else {
-        x8_text(c.x + 8, y, lines[row], X8_WIN_WHITE, X8_WIN_BLACK);
+    int len = (int)str_len(lines[row]);
+    if (len > cols_visible) len = cols_visible;
+    for (int i = 0; i < len; i++) {
+        char one[2];
+        one[0] = lines[row][i];
+        one[1] = '\0';
+        x8_text(c.x + 8 + i * 8, y, one,
+                line_color[row][i] ? line_color[row][i] : X8_WIN_WHITE,
+                X8_WIN_BLACK);
     }
+
+    if (row == line_count - 1 && line_open && caret_on && len < cols_visible)
+        x8_text(c.x + 8 + len * 8, y, "_", X8_WIN_WHITE, X8_WIN_BLACK);
 }
 
 static void draw_status(void) {
@@ -80,110 +232,6 @@ static void draw_scene(void) {
     draw_status();
 }
 
-static void push_line(const char *s) {
-    if (line_count >= MAX_ROWS) {
-        mem_copy(lines[0], lines[1],
-                 (MAX_ROWS - 1) * (MAX_COLS + 1));
-        line_count = MAX_ROWS - 1;
-    }
-    str_copy(lines[line_count], s);
-    int limit = cols_visible;
-    if (limit > MAX_COLS) limit = MAX_COLS;
-    if ((int)str_len(lines[line_count]) > limit)
-        lines[line_count][limit] = '\0';
-    line_count++;
-}
-
-static void say(const char *s) {
-    push_line(s);
-    full_redraw = 1;
-}
-
-static void run_external(const char *path) {
-    if (!path[0]) return;
-
-    xec_args_t args;
-    const char *argv[16];
-    for (int i = 0; i < 16; i++) argv[i] = 0;
-    argv[0] = "term";
-    argv[1] = path;
-    args.argc = 2;
-    args.reserved = 0;
-    for (int i = 0; i < 16; i++) args.argv[i] = argv[i];
-    args.cwd = "";
-
-    x8_cursor_hide();
-    (void)xec_run(path, &args);
-    x8_flush_keys();
-    x8_desktop_background();
-    recompute();
-    full_redraw = 1;
-}
-
-static void execute(const char *line) {
-    char cmd[32], arg[MAX_COLS + 1];
-    int n = 0, i = 0;
-
-    while (line[i] == ' ') i++;
-    while (line[i] && line[i] != ' ' && n < (int)sizeof(cmd) - 1)
-        cmd[n++] = line[i++];
-    cmd[n] = '\0';
-    while (line[i] == ' ') i++;
-    str_copy(arg, line + i);
-
-    if (cmd[0] == '\0') return;
-
-    if (str_eq(cmd, "help")) {
-        say("help       show this list");
-        say("clear      clear the screen");
-        say("echo ...   print text");
-        say("ver        show version");
-        say("uptime     show ticks since boot");
-        say("run PATH   launch a .xec program");
-        say("exit       leave the terminal");
-        return;
-    }
-    if (str_eq(cmd, "clear")) {
-        line_count = 1;
-        lines[0][0] = '\0';
-        full_redraw = 1;
-        return;
-    }
-    if (str_eq(cmd, "echo")) {
-        say(arg);
-        return;
-    }
-    if (str_eq(cmd, "ver")) {
-        say("Woodpile Terminal 1.0 / X8");
-        return;
-    }
-    if (str_eq(cmd, "uptime")) {
-        char text[64];
-        str_copy(text, "uptime ticks: ");
-        num_to_str((unsigned long)(time_ticks() / 100), text + 14);
-        say(text);
-        return;
-    }
-    if (str_eq(cmd, "run")) {
-        char text[MAX_COLS + 1];
-        str_copy(text, "run ");
-        str_copy(text + 4, arg);
-        say(text);
-        run_external(arg);
-        return;
-    }
-    if (str_eq(cmd, "exit")) {
-        str_copy(status_text, "Type Esc or click the close box to exit");
-        status_dirty = 1;
-        return;
-    }
-
-    char text[MAX_COLS + 1];
-    str_copy(text, "unknown command: ");
-    str_copy(text + 17, cmd);
-    say(text);
-}
-
 int xec_entry(const xec_args_t *args) {
     (void)args;
     gfx_enter();
@@ -191,8 +239,12 @@ int xec_entry(const xec_args_t *args) {
     setup_window();
     x8_cursor_load(&cursor, "sys32/lib/cursors/Normal.cur");
     x8_drag_init(&win_drag);
-    str_copy(lines[0], "Woodpile Terminal 1.0 - type help for commands");
-    draw_scene();
+
+    qnt_core_init();
+    qnt_core_welcome(&gui_io);
+    qnt_core_prompt(&gui_io);
+    input_start = (int)str_len(lines[line_count - 1]);
+    full_redraw = 1;
 
     uint64_t last_blink = time_ticks();
     int blink = 1;
@@ -221,34 +273,38 @@ int xec_entry(const xec_args_t *args) {
         int key;
         while ((key = x8_key()) >= 0) {
             if (key == X8_KEY_ESC) goto done;
+
             if (key == X8_KEY_ENTER) {
-                char copy[MAX_COLS + 1];
-                str_copy(copy, input);
-                char shown[MAX_COLS + 1];
-                str_copy(shown, PROMPT);
-                str_copy(shown + str_len(PROMPT), input);
-                push_line(shown);
-                input_len = 0;
-                input[0] = '\0';
-                execute(copy);
+                int row = line_count - 1;
+                int len = (int)str_len(lines[row]);
+                char cmd[MAX_COLS + 1];
+                int n = 0;
+                for (int i = input_start; i < len && n < MAX_COLS; i++)
+                    cmd[n++] = lines[row][i];
+                cmd[n] = '\0';
+
+                append_char('\n');
+                if (qnt_core_execute(cmd, &gui_io)) goto done;
+                if (clear_requested) clear_requested = 0;
+                qnt_core_prompt(&gui_io);
+                input_start = (int)str_len(lines[line_count - 1]);
                 full_redraw = 1;
                 continue;
             }
+
             if (key == X8_KEY_BACK) {
-                if (input_len > 0) {
-                    input[--input_len] = '\0';
-                    draw_row(line_count - 1);
+                int row = line_count - 1;
+                int len = (int)str_len(lines[row]);
+                if (len > input_start) {
+                    lines[row][len - 1] = '\0';
+                    full_redraw = 1;
                 }
                 continue;
             }
+
             if (key >= 32 && key < 127) {
-                int limit = cols_visible - (int)str_len(PROMPT) - 2;
-                if (limit > MAX_COLS - 1) limit = MAX_COLS - 1;
-                if (input_len < limit) {
-                    input[input_len++] = (char)key;
-                    input[input_len] = '\0';
-                    draw_row(line_count - 1);
-                }
+                append_char(key);
+                full_redraw = 1;
             }
         }
 
@@ -257,13 +313,9 @@ int xec_entry(const xec_args_t *args) {
             last_blink = now;
             blink = !blink;
             caret_on = blink;
-            draw_row(line_count - 1);
+            full_redraw = 1;
         }
 
-        if (status_dirty) {
-            draw_status();
-            status_dirty = 0;
-        }
         if (full_redraw) {
             draw_scene();
             full_redraw = 0;

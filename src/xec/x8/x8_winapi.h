@@ -52,6 +52,9 @@ int x8_window_drag(x8_drag_t *d, x8_window_t *win,
 
 /* Repaint the X8 desktop pattern only where a dragged window used to be. */
 void x8_desktop_restore_rect(int x, int y, int w, int h);
+/* Low-level checker/bars paint.  x8_shell_draw() builds on this. */
+void x8_desktop_fill(void);
+/* Restore the desktop plus the Program Manager window behind an app. */
 void x8_desktop_background(void);
 
 void x8_button(int x, int y, int w, int h, const char *label, int pressed);

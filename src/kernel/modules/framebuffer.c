@@ -346,7 +346,6 @@ void fb_console_clear(void) {
 void fb_gui_enter(void) {
     if (gui_depth++ == 0) {
         cursor_visible = 0;
-        mouse_set_pos(0, 0);
     }
 }
 
