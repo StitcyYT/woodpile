@@ -1,0 +1,31 @@
+[ 2026, 5/25, 8:11:03 ]: Today on this day, i started this project. Minutes ago i have just done my homework and saved myself.
+
+[ 2026, 5/25, 8:24:11 ]: Just messing around.. Don't actualy know what to do with this.. Acutaly.. Let me test with QEMU
+
+[ 2026, 5/25, 8:43:17 ]: OHH WAIT... FORGOT TO PAD!!! Okay now i will do this correctly.
+
+[ 2026, 5/25, 8:48:50 ]: Okay.. I will try to make this shi 64 bit.. ALSO... Good name 'ShortKernel'
+
+[ 2026, 2/25, 10:27:24 ]: everything ok bradar but no 64 :P
+
+[ 2026, 2/25, 10:33:16 ]: Setted up. Now add finishing parts!!!!!!!!
+
+no.. not anymore.
+
+[ 2026, 11/17, 21:55:00 ]: Made the filesystem real. sys32/run64.co and
+[ 2026, 11/17, 21:55:00 ]: sys32/att.co are now actual ELF64 .o files with a
+[ 2026, 11/17, 21:55:00 ]: .co extension, loaded by a tiny kernel ELF loader.
+[ 2026, 11/17, 21:55:00 ]: Dropped the useless boot16.co / nuser.so / floader.conf.
+[ 2026, 11/17, 21:55:00 ]: VBE is capped at 1280x800 instead of 4K.
+[ 2026, 11/17, 21:55:00 ]: PS/2 mouse works - the VBE trampoline was clearing IF,
+[ 2026, 11/17, 21:55:00 ]: so interrupts are re-enabled after it returns.
+[ 2026, 11/17, 21:55:00 ]: att.co draws the arrow from assets/cursors/arrow_l.png
+[ 2026, 11/17, 21:55:00 ]: on teal, with partial redraw instead of a full clear.
+[ 2026, 11/17, 22:05:00 ]: Added /devc/umouse - a live 8-byte pseudo-file in the
+[ 2026, 11/17, 22:05:00 ]: initramfs (uint32 x, uint32 y). att.co reads the mouse
+[ 2026, 11/17, 22:05:00 ]: from the filesystem instead of calling the driver.
+[ 2026, 11/17, 22:05:00 ]: Paths with a leading '/' now work too.
+[ 2026, 11/17, 22:10:00 ]: Cursor rendered at half size (16x16) from the original
+[ 2026, 11/17, 22:10:00 ]: untouched 32x32 PNG. Scaling happens only in att.co's
+[ 2026, 11/17, 22:10:00 ]: draw loop via a 2x2 alpha-weighted downsample; the source
+[ 2026, 11/17, 22:10:00 ]: asset and cursor.raw stay at full resolution.

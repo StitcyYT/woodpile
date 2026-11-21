@@ -1,0 +1,185 @@
+[org 0x7C00]
+[bits 16]
+
+jmp start
+
+boot_drive db 0x80
+
+CODE_SEG equ 0x08
+DATA_SEG equ 0x10
+
+startmsg db "MyOS", 13, 10, 0
+errormsg db "Error loading kernel", 13, 10, 0
+art_line1 db "      __", 0
+art_line2 db " _   / /", 0
+art_line3 db "(_) | | ", 0
+art_line4 db " _  | | ", 0
+art_line5 db "(_) | | ", 0
+art_line6 db "     \_\ ", 0
+
+start:
+	cli
+
+	xor ax, ax
+	mov ds, ax
+	mov es, ax
+	mov ss, ax 
+	mov sp, 0x7C00
+	mov [boot_drive], dl
+
+	mov si, startmsg
+	call print
+
+	call a20
+	call load_boot
+
+	cli
+
+	lgdt [gdtdsc_32]
+
+	mov eax, cr0
+	or eax, 1 
+	mov cr0, eax
+
+	jmp CODE_SEG:main_32
+
+load_boot:
+	mov ax, 0x0000
+	mov es, ax
+	mov bx, 0x1000 
+	mov ah, 0x02
+	mov al, 60
+	mov ch, 0x00
+	mov cl, 0x02
+	mov dh, 0x00
+
+	mov dl, [boot_drive]
+	int 0x13
+	jc .le
+	ret
+
+.le:
+	push ax
+	mov ax, 0x0003
+	int 0x10
+	mov ah, 0x09
+	mov al, ' '
+	mov bh, 0
+	mov bl, 0x1F
+	mov cx, 2000
+	int 0x10
+	mov si, art_line1
+	mov dx, 0x0523
+	call print_at
+	mov si, art_line2
+	mov dx, 0x0623
+	call print_at
+	mov si, art_line3
+	mov dx, 0x0723
+	call print_at
+	mov si, art_line4
+	mov dx, 0x0823
+	call print_at
+	mov si, art_line5
+	mov dx, 0x0923
+	call print_at
+	mov si, art_line6
+	mov dx, 0x0A23
+	call print_at
+	mov si, errormsg
+	mov dx, 0x0C1E
+	call print_at
+	pop ax
+	mov cx, 29
+.spaces:
+	mov al, ' '
+	mov ah, 0x0E
+	int 0x10
+	dec cx
+	jns .spaces
+	mov al, ah
+	call print_hex
+	jmp $
+
+print_at:
+	mov ah, 0x02
+	mov bh, 0
+	int 0x10
+.next:
+	lodsb
+	cmp al, 0
+	je .done
+	mov ah, 0x0E
+	int 0x10
+	jmp .next
+.done:
+	ret
+
+print_hex:
+	push ax
+	push cx
+	mov ah, al
+	shr al, 4
+	cmp al, 10
+	jb .digit1
+	add al, 'A' - 10
+	jmp .print1
+.digit1:
+	add al, '0'
+.print1:
+	mov ah, 0x0E
+	int 0x10
+	mov al, ah
+	and al, 0x0F
+	cmp al, 10
+	jb .digit2
+	add al, 'A' - 10
+	jmp .print2
+.digit2:
+	add al, '0'
+.print2:
+	mov ah, 0x0E
+	int 0x10
+	pop cx
+	pop ax
+	ret
+
+gdt_32:
+	dq 0
+	dq 0x00CF9A000000FFFF
+	dq 0x00CF92000000FFFF
+
+gdte_32:
+
+gdtdsc_32:
+	dw gdte_32 - gdt_32 - 1
+	dd gdt_32
+
+a20:
+	in al, 0x92
+	or al, 0x02
+	out 0x92, al
+	ret
+
+print:
+	lodsb
+	cmp al, 0
+	je .finish
+	mov ah, 0x0E
+	int 0x10
+	jmp print
+.finish:
+	ret
+
+[bits 32]
+main_32:
+	mov ax, DATA_SEG
+	mov ds, ax
+	mov es, ax
+	mov ss, ax
+	mov esp, 0x90000
+
+	jmp 0x08:0x1000
+
+times 510-($-$$) db 0
+dw 0xAA55	

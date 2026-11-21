@@ -1,0 +1,61 @@
+#ifndef ABI_H
+#define ABI_H
+
+/* Fixed physical address of the .xec syscall jump table. */
+#define WP_ABI_BASE 0x800000UL
+
+enum {
+    ABI_TTY_CLEAR = 0,
+    ABI_TTY_PUTC,
+    ABI_TTY_PUTS,
+    ABI_TTY_SETCOLOR,
+    ABI_TTY_SETXY,
+    ABI_TTY_GETXY,
+    ABI_TTY_COLS,
+    ABI_TTY_ROWS,
+    ABI_TTY_SETCELL,
+    ABI_TTY_CLEARLINE,
+    ABI_TTY_FLUSH,
+    ABI_TTY_SCROLL,
+
+    ABI_FS_READ,
+    ABI_FS_LIST,
+    ABI_FS_REMOVE,
+    ABI_FS_WRITE,
+    ABI_FS_ISDIR,
+
+    ABI_XEC_RUN,
+
+    ABI_SERIAL_PUTS,
+    ABI_SERIAL_PUTHEX,
+    ABI_TIME_SLEEP,
+    ABI_TIME_TICKS,
+    ABI_TIME_CPU,
+    ABI_TIME_UPTIME,
+
+    ABI_KBD_GETLINE,
+    ABI_KBD_GETC,
+
+    ABI_AUDIO_PROBE,
+    ABI_AUDIO_PLAY,
+
+    ABI_GFX_ENTER,
+    ABI_GFX_LEAVE,
+    ABI_GFX_WIDTH,
+    ABI_GFX_HEIGHT,
+    ABI_GFX_RGB,
+    ABI_GFX_CLEAR,
+    ABI_GFX_PIXEL,
+    ABI_GFX_GETPIXEL,
+    ABI_GFX_RECT,
+    ABI_GFX_TEXT,
+
+    ABI_MOUSE_STATE,
+    ABI_KBD_SCANCODE,
+
+    ABI_COUNT
+};
+
+void abi_init(void);
+
+#endif
