@@ -96,19 +96,41 @@ def main(argv):
         if p_type == PT_LOAD:
             loads.append((p_offset, p_vaddr, p_filesz, p_memsz))
 
-    if len(loads) != 1:
-        die("XEC images need exactly one PT_LOAD segment, found %d" % len(loads))
+    if not loads:
+        die("ELF has no PT_LOAD segment")
 
-    p_offset, p_vaddr, p_filesz, p_memsz = loads[0]
-    if p_vaddr != load_addr:
+    # GNU ld may split a program with initialized data into separate R+X and
+    # R+W load segments.  The XEC loader only understands one flat image, so
+    # merge all load segments into a single memory image.  Gaps between them
+    # are ELF alignment padding and stay zero.
+    loads.sort(key=lambda item: item[1])
+    base = loads[0][1]
+    if base != load_addr:
         die("load address mismatch: ELF says 0x%x, requested 0x%x" %
-            (p_vaddr, load_addr))
-    if p_filesz == 0 or p_memsz < p_filesz:
-        die("bad PT_LOAD sizes")
-    if p_offset + p_filesz > len(data):
-        die("PT_LOAD segment is truncated")
-    if entry < p_vaddr or entry >= p_vaddr + p_filesz:
-        die("ELF entry point is outside the load segment")
+            (base, load_addr))
+
+    total = 0
+    code_end = 0
+    prev_end = base
+    for p_offset, p_vaddr, p_filesz, p_memsz in loads:
+        if p_memsz < p_filesz:
+            die("bad PT_LOAD sizes")
+        if p_offset + p_filesz > len(data):
+            die("PT_LOAD segment is truncated")
+        if p_vaddr < prev_end:
+            die("overlapping PT_LOAD segments")
+        end = p_vaddr - base + p_memsz
+        if end > total:
+            total = end
+        file_end = p_vaddr - base + p_filesz
+        if file_end > code_end:
+            code_end = file_end
+        prev_end = p_vaddr + p_memsz
+
+    if code_end == 0 or total < code_end:
+        die("bad merged load image")
+    if entry < base or entry >= base + code_end:
+        die("ELF entry point is outside the load image")
 
     if shoff and shnum:
         if shstrndx >= shnum:
@@ -144,10 +166,14 @@ def main(argv):
                 if name in BAD_SECTIONS:
                     die("ELF contains host-loader section %s" % name)
 
-    entry_offset = entry - p_vaddr
-    code_size = p_filesz
-    bss_size = p_memsz - p_filesz
-    image = data[p_offset:p_offset + code_size]
+    entry_offset = entry - base
+    code_size = code_end
+    bss_size = total - code_end
+    image = bytearray(code_size)
+    for p_offset, p_vaddr, p_filesz, _p_memsz in loads:
+        image_off = p_vaddr - base
+        image[image_off:image_off + p_filesz] = \
+            data[p_offset:p_offset + p_filesz]
 
     header = HEADER.pack(MAGIC, 1, 0, entry_offset, code_size,
                          0, bss_size, load_addr)

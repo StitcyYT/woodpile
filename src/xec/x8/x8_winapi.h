@@ -11,6 +11,7 @@
 #define X8_HIT_FRAME   1
 #define X8_HIT_CLOSE   2
 #define X8_HIT_CLIENT  3
+#define X8_HIT_TITLE   4
 
 typedef struct {
     int x, y, w, h;
@@ -36,6 +37,22 @@ void x8_window_init(x8_window_t *win, int x, int y, int w, int h,
 void x8_window_draw(const x8_window_t *win, int focused);
 int x8_window_hit(const x8_window_t *win, int mx, int my);
 void x8_window_client(const x8_window_t *win, x8_rect_t *client);
+
+/* Smooth title-bar dragging: only a 1px outline moves while the button is
+ * held.  Return 2 while dragging, 1 on drop (caller repaints), 0 otherwise. */
+typedef struct {
+    int active, dragging;
+    int dx, dy;
+    int nx, ny;
+} x8_drag_t;
+
+void x8_drag_init(x8_drag_t *d);
+int x8_window_drag(x8_drag_t *d, x8_window_t *win,
+                   int mx, int my, int buttons, int hit);
+
+/* Repaint the X8 desktop pattern only where a dragged window used to be. */
+void x8_desktop_restore_rect(int x, int y, int w, int h);
+void x8_desktop_background(void);
 
 void x8_button(int x, int y, int w, int h, const char *label, int pressed);
 int x8_button_hit(int x, int y, int w, int h, int mx, int my);

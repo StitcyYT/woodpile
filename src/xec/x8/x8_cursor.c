@@ -127,9 +127,9 @@ static int decode_dib(const unsigned char *dib, unsigned int size,
         am = 0xFF000000u;
         off += 12;
     } else if (bpp == 32) {
-        /* DIB stores pixels as R,G,B,A bytes; rd32() builds 0xAABBGGRR,
-         * so R is the low byte, alpha the high byte. */
-        rm = 0x000000FFu; gm = 0x0000FF00u; bm = 0x00FF0000u;
+        /* 32bpp ICO/CUR DIB pixels are B,G,R,A bytes. rd32() packs those as
+         * 0xAARRGGBB, so red is bits 16-23 and blue is bits 0-7. */
+        rm = 0x00FF0000u; gm = 0x0000FF00u; bm = 0x000000FFu;
         am = 0xFF000000u;
     } else if (bpp == 16) {
         rm = 0x00007C00u; gm = 0x000003E0u; bm = 0x0000001Fu; am = 0;
@@ -444,6 +444,41 @@ void x8_cursor_draw(x8_cursor_t *cur, int x, int y) {
     saved_hot_x = cur->hot_x[frame];
     saved_hot_y = cur->hot_y[frame];
     saved_active = 1;
+}
+
+void x8_image_draw(const x8_cursor_t *img, int x, int y, int scale) {
+    if (!img || img->count <= 0 || scale <= 0) return;
+
+    int frame = img->frame;
+    if (frame < 0 || frame >= img->count) frame = 0;
+
+    int w = img->w * scale;
+    int h = img->h * scale;
+    int fbw = gfx_width(), fbh = gfx_height();
+    int sx0 = x < 0 ? 0 : x;
+    int sy0 = y < 0 ? 0 : y;
+    int sx1 = x + w > fbw ? fbw : x + w;
+    int sy1 = y + h > fbh ? fbh : y + h;
+    if (sx1 <= sx0 || sy1 <= sy0) return;
+
+    blend_init();
+    for (int py = sy0; py < sy1; py++) {
+        int row = (py - y) / scale;
+        for (int px = sx0; px < sx1; px++) {
+            int col = (px - x) / scale;
+            int li = row * img->w + col;
+            if (li < 0 || li >= img->w * img->h) continue;
+
+            int fi = frame * X8_CURSOR_PIXELS + li;
+            int ci = fi / X8_CURSOR_PIXELS;
+            int pi = fi % X8_CURSOR_PIXELS;
+            int a = img->alpha[ci][pi];
+            if (a <= 0) continue;
+
+            unsigned int bg = gfx_getpixel(px, py);
+            gfx_pixel(px, py, blend_pixel(bg, img->color[ci][pi], a));
+        }
+    }
 }
 
 int x8_cursor_hot_x(const x8_cursor_t *cur) {

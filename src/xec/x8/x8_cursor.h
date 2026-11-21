@@ -30,6 +30,10 @@ void x8_cursor_animate(x8_cursor_t *cur, uint64_t now_ms);
 /* Draw with (x, y) as the hotspot position. Only one cursor is on screen;
  * drawing a new one restores the framebuffer bits saved by the previous draw. */
 void x8_cursor_draw(x8_cursor_t *cur, int x, int y);
+
+/* Draw a decoded CUR/ICO image without touching cursor save state.
+ * scale=1 is native size; scale=4 maps a 16x16 ICO into a 64x64 launcher slot. */
+void x8_image_draw(const x8_cursor_t *img, int x, int y, int scale);
 void x8_cursor_hide(void);
 
 int x8_cursor_hot_x(const x8_cursor_t *cur);

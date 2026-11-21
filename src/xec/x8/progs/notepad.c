@@ -8,6 +8,7 @@
 
 static x8_cursor_t cursor;
 static x8_window_t win;
+static x8_drag_t win_drag;
 static char text[MAX_LINES][MAX_COLS + 1];
 static char save_buf[MAX_LINES * (MAX_COLS + 1) + MAX_LINES];
 static char status_text[96] = "Ctrl+S save  -  Esc exit  -  click to place caret";
@@ -233,6 +234,7 @@ int xec_entry(const xec_args_t *args) {
     gfx_enter();
     setup_window();
     x8_cursor_load(&cursor, "sys32/lib/cursors/Handwriting.cur");
+    x8_drag_init(&win_drag);
     load_file();
 
     uint64_t start = time_ticks();
@@ -249,13 +251,22 @@ int xec_entry(const xec_args_t *args) {
 
         int mx = 0, my = 0, buttons = 0;
         x8_mouse(&mx, &my, &buttons);
+        int hit = x8_window_hit(&win, mx, my);
+        int drag_state = x8_window_drag(&win_drag, &win,
+                                        mx, my, buttons, hit);
+        if (drag_state == 1) {
+            x8_desktop_background();
+            draw_scene(caret_visible);
+            caret_line = cur_line;
+            caret_col = cur_col;
+        }
         int clicked = (buttons & 1) && !(last_buttons & 1);
         last_buttons = buttons;
 
-        if (clicked && x8_window_hit(&win, mx, my) == X8_HIT_CLOSE)
+        if (clicked && drag_state == 0 && hit == X8_HIT_CLOSE)
             break;
 
-        if (clicked) {
+        if (clicked && drag_state == 0) {
             x8_rect_t c;
             x8_window_client(&win, &c);
             if (x8_inside(mx, my, c.x + GUTTER, c.y,

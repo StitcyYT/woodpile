@@ -39,11 +39,13 @@ ISOCG ?= $(HOME)/.local/bin/isocg
 
 X8_SRC = $(SRC)/xec/x8
 X8_GAMES = $(BUILD)/games/snake.xec $(BUILD)/games/pong.xec
-X8_PROGS = $(BUILD)/progs/paint.xec $(BUILD)/progs/notepad.xec
+X8_PROGS = $(BUILD)/progs/paint.xec $(BUILD)/progs/notepad.xec \
+           $(BUILD)/progs/term.xec
 X8_XECS = $(BUILD)/x8.xec $(X8_GAMES) $(X8_PROGS)
 X8_LIB_SRCS = $(X8_SRC)/x8.c $(X8_SRC)/x8_winapi.c $(X8_SRC)/x8_cursor.c
 X8_LIB_OBJS = $(BUILD)/x8.o $(BUILD)/x8_winapi.o $(BUILD)/x8_cursor.o
 X8_CURSORS = $(wildcard assets/cursors/*)
+X8_ICONS = $(wildcard assets/icons/*.ico)
 
 all: $(BUILD)/os.img
 
@@ -202,13 +204,14 @@ $(eval $(call X8_XEC_RULE,$(BUILD)/games/snake.xec,$(X8_SRC)/games/snake.c,0x980
 $(eval $(call X8_XEC_RULE,$(BUILD)/games/pong.xec,$(X8_SRC)/games/pong.c,0x990000,pong))
 $(eval $(call X8_XEC_RULE,$(BUILD)/progs/paint.xec,$(X8_SRC)/progs/paint.c,0x9A0000,paint))
 $(eval $(call X8_XEC_RULE,$(BUILD)/progs/notepad.xec,$(X8_SRC)/progs/notepad.c,0x9B0000,notepad))
+$(eval $(call X8_XEC_RULE,$(BUILD)/progs/term.xec,$(X8_SRC)/progs/term.c,0x1500000,term))
 
 # ---- PLAY3 media: keep every container playable via raw conversion ----
 $(MEDIA): tools/rplay_prep.py
 	python3 tools/rplay_prep.py $(RPLAY_SRC) $@
 
 # ---- initramfs staging ----
-$(INITRD): $(XECS) $(X8_XECS) $(MEDIA) assets/cursors
+$(INITRD): $(XECS) $(X8_XECS) $(MEDIA) assets/cursors assets/icons
 	rm -rf $@
 	mkdir -p $@
 	cp -a initramfs/. $@/
@@ -218,6 +221,8 @@ $(INITRD): $(XECS) $(X8_XECS) $(MEDIA) assets/cursors
 	mkdir -p $@/sys32/bin $@/sys32/lib/cursors $@/media $@/games $@/progs
 	cp -a $(MEDIA)/. $@/media/
 	cp -a assets/cursors/. $@/sys32/lib/cursors/
+	mkdir -p $@/sys32/icons
+	cp $(X8_ICONS) $@/sys32/icons/
 	cp $(XECS) $@/sys32/bin/
 	cp $(BUILD)/x8.xec $@/sys32/bin/
 	cp $(X8_GAMES) $@/games/

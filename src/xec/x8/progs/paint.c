@@ -8,6 +8,7 @@
 
 static x8_cursor_t cursor;
 static x8_window_t win;
+static x8_drag_t win_drag;
 static x8_rect_t canvas_rect;
 static int canvas_w, canvas_h, canvas_x, canvas_y;
 static unsigned char canvas[MAX_CANVAS_W * MAX_CANVAS_H];
@@ -24,6 +25,8 @@ static const unsigned char palette[PALETTE_N][3] = {
     {40,90,40}, {240,240,240}, {255,255,0}, {0,0,0}
 };
 
+static void reposition(void);
+
 static unsigned int palette_color(int i) {
     if (i < 0 || i >= PALETTE_N) i = 0;
     return x8_color(palette[i][0], palette[i][1], palette[i][2]);
@@ -38,7 +41,10 @@ static void setup_window(void) {
     if (h < 420) h = 420;
     x8_window_init(&win, (sw - w) / 2, (sh - h) / 2, w, h,
                    "Paint", "File  Edit  Colors", X8_WF_CLOSE | X8_WF_MENU);
+    reposition();
+}
 
+static void reposition(void) {
     x8_rect_t c;
     x8_window_client(&win, &c);
     canvas_x = c.x + 3;
@@ -177,12 +183,25 @@ int xec_entry(const xec_args_t *args) {
     gfx_enter();
     setup_window();
     x8_cursor_load(&cursor, "sys32/lib/cursors/Handwriting.cur");
+    x8_drag_init(&win_drag);
     draw_scene();  /* one-time full draw; all later updates are partial */
 
     int last_buttons = 0;
     for (;;) {
         int mx = 0, my = 0, buttons = 0;
         x8_mouse(&mx, &my, &buttons);
+        int hit = x8_window_hit(&win, mx, my);
+        int drag_state = x8_window_drag(&win_drag, &win,
+                                        mx, my, buttons, hit);
+        if (drag_state == 2) {
+            x8_cursor_hide();
+        } else if (drag_state == 1) {
+            x8_cursor_hide();
+            x8_desktop_background();
+            reposition();
+            draw_scene();
+            last_valid = 0;
+        }
 
         /* Only erase the pointer when this frame really changes pixels
          * underneath it.  Hiding it every iteration was the jitter source.
@@ -192,13 +211,13 @@ int xec_entry(const xec_args_t *args) {
         int drawing = (buttons & 3) && inside;
         if (drawing) x8_cursor_hide();
 
-        if ((buttons & 1) && !(last_buttons & 1) &&
-            x8_window_hit(&win, mx, my) == X8_HIT_CLOSE)
+        int clicked = (buttons & 1) && !(last_buttons & 1);
+        if (clicked && drag_state == 0 && hit == X8_HIT_CLOSE)
             break;
 
         x8_rect_t c;
         x8_window_client(&win, &c);
-        if ((buttons & 1) && !(last_buttons & 1) &&
+        if (clicked && drag_state == 0 &&
             x8_inside(mx, my, c.x + 66, c.y + 2, PALETTE_N * 30, 28)) {
             select_color((mx - (c.x + 68)) / 30);
         }

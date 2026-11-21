@@ -7,6 +7,7 @@
 
 static x8_cursor_t cursor;
 static x8_window_t win;
+static x8_drag_t win_drag;
 static x8_rect_t field;
 static int seg_x[MAX_SEG], seg_y[MAX_SEG];
 static int seg_len, dir_x, dir_y, food_x, food_y;
@@ -20,6 +21,7 @@ static void draw_score(void);
 static void draw_background(void);
 static void draw_game_over(void);
 static void redraw_all(void);
+static void reposition(void);
 
 static int next_rand(int n) {
     rng_state = rng_state * 1103515245u + 12345u;
@@ -55,7 +57,10 @@ static void setup_window(void) {
     if (h < 360) h = 360;
     x8_window_init(&win, (sw - w) / 2, (sh - h) / 2, w, h,
                    "Snake", "Game  Help", X8_WF_CLOSE | X8_WF_MENU);
+    reposition();
+}
 
+static void reposition(void) {
     x8_rect_t c;
     x8_window_client(&win, &c);
     field = c;
@@ -199,6 +204,7 @@ int xec_entry(const xec_args_t *args) {
     gfx_enter();
     setup_window();
     x8_cursor_load(&cursor, "sys32/lib/cursors/Normal.cur");
+    x8_drag_init(&win_drag);
     x8_cursor_hide();
     reset_game();
 
@@ -208,8 +214,17 @@ int xec_entry(const xec_args_t *args) {
     for (;;) {
         int mx = 0, my = 0, buttons = 0;
         x8_mouse(&mx, &my, &buttons);
-        if ((buttons & 1) && !(last_buttons & 1) &&
-            x8_window_hit(&win, mx, my) == X8_HIT_CLOSE)
+        int hit = x8_window_hit(&win, mx, my);
+        int drag_state = x8_window_drag(&win_drag, &win,
+                                        mx, my, buttons, hit);
+        if (drag_state == 2) {
+            x8_cursor_hide();
+        } else if (drag_state == 1) {
+            x8_desktop_background();
+            reposition();
+            redraw_all();
+        }
+        if ((buttons & 1) && !(last_buttons & 1) && hit == X8_HIT_CLOSE)
             break;
         last_buttons = buttons;
 
