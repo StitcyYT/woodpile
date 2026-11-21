@@ -215,7 +215,7 @@ $(eval $(call X8_XEC_RULE,$(BUILD)/games/snake.xec,$(X8_SRC)/games/snake.c,0x980
 $(eval $(call X8_XEC_RULE,$(BUILD)/games/pong.xec,$(X8_SRC)/games/pong.c,0x990000,pong))
 $(eval $(call X8_XEC_RULE,$(BUILD)/progs/paint.xec,$(X8_SRC)/progs/paint.c,0x9A0000,paint))
 $(eval $(call X8_XEC_RULE,$(BUILD)/progs/notepad.xec,$(X8_SRC)/progs/notepad.c,0x9B0000,notepad))
-$(eval $(call X8_XEC_RULE,$(BUILD)/progs/term.xec,$(X8_SRC)/progs/term.c,0x1500000,term,$(QNT_CORE_OBJ)))
+$(eval $(call X8_XEC_RULE,$(BUILD)/progs/term.xec,$(X8_SRC)/progs/term.c,0x1500000,term))
 
 # ---- PLAY3 media: keep every container playable via raw conversion ----
 $(MEDIA): tools/rplay_prep.py

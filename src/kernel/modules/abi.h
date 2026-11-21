@@ -53,6 +53,9 @@ enum {
     ABI_MOUSE_STATE,
     ABI_KBD_SCANCODE,
 
+    ABI_TTY_CAPTURE_SET,
+    ABI_TTY_CAPTURE_LEN,
+
     ABI_COUNT
 };
 

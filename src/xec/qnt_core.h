@@ -20,5 +20,6 @@ void qnt_core_prompt(const qnt_io_t *io);
 /* Returns 1 when the shell should exit. */
 int qnt_core_execute(const char *line, const qnt_io_t *io);
 const char *qnt_core_cwd(void);
+void qnt_core_set_cwd(const char *cwd);
 
 #endif

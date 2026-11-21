@@ -64,4 +64,7 @@ void abi_init(void) {
 
     put(ABI_MOUSE_STATE,   (void *)&mouse_state);
     put(ABI_KBD_SCANCODE,  (void *)&kbd_scancode_nb);
+
+    put(ABI_TTY_CAPTURE_SET, (void *)&fb_capture_set);
+    put(ABI_TTY_CAPTURE_LEN, (void *)&fb_capture_len);
 }

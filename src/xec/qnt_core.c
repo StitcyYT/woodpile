@@ -18,6 +18,13 @@ void qnt_core_init(void) {
     str_copy(cwd, "sys32");
 }
 
+void qnt_core_set_cwd(const char *next) {
+    if (!next) return;
+    unsigned int n = 0;
+    for (; next[n] && n < sizeof(cwd) - 1; n++) cwd[n] = next[n];
+    cwd[n] = '\0';
+}
+
 void qnt_core_welcome(const qnt_io_t *io) {
     emit(io, "\\c:WHITE|Welcome to \\c:RAINBOW|'woodpile' shell!\\c:GRAY|\n");
 }

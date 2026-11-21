@@ -119,6 +119,36 @@ static int cursor_visible = 1;
 static unsigned int cursor_blink_ticks;
 static int gui_depth;
 
+/* Optional raw TTY capture.  X8's Terminal sets this around a qnt.xec call so
+ * external commands such as lid.xec print into the window instead of the
+ * hidden text console. */
+static char *capture_buf;
+static unsigned int capture_cap;
+static unsigned int capture_len;
+
+static void capture_bytes(const char *s, unsigned int n) {
+    if (!capture_buf || !capture_cap) return;
+    for (unsigned int i = 0; i < n; i++) {
+        if (capture_len >= capture_cap) return;
+        capture_buf[capture_len++] = s[i];
+    }
+}
+
+static void capture_char(int c) {
+    char byte = (char)(unsigned char)c;
+    capture_bytes(&byte, 1);
+}
+
+void fb_capture_set(void *buf, unsigned int cap) {
+    capture_buf = (char *)buf;
+    capture_cap = cap;
+    capture_len = 0;
+}
+
+unsigned int fb_capture_len(void) {
+    return capture_len;
+}
+
 /* ------------------------------------------------------------------ */
 /* Console: a cell grid rendered through the same font/framebuffer.    */
 /* Row 0 is reserved for the top bar.                                  */
@@ -243,7 +273,7 @@ static void advance(void) {
     }
 }
 
-void fb_putc(int c) {
+static void putc_inner(int c) {
     if (c == '\n') {
         ccx = 0;
         ccy++;
@@ -259,7 +289,7 @@ void fb_putc(int c) {
         return;
     }
     if (c == '\t') {
-        for (int i = 0; i < 4; i++) fb_putc(' ');
+        for (int i = 0; i < 4; i++) putc_inner(' ');
         return;
     }
 
@@ -274,6 +304,17 @@ void fb_putc(int c) {
     cells[ccy][ccx].bg = (unsigned char)cur_bg;
     cells[ccy][ccx].dirty = 1;
     advance();
+}
+
+void fb_putc(int c) {
+    /* While a GUI app is capturing the TTY, its output belongs only in the
+     * capture buffer.  Writing the hidden console as well would replay every
+     * prompt on the text screen as soon as the GUI exits. */
+    if (capture_buf && capture_cap) {
+        capture_char(c);
+        return;
+    }
+    putc_inner(c);
 }
 
 static int color_index(const char *name, int len) {
@@ -294,19 +335,27 @@ static int color_index(const char *name, int len) {
 
 void fb_puts(const char *s) {
     if (!s) return;
+
+    unsigned int n = 0;
+    while (s[n]) n++;
+    if (capture_buf && capture_cap) {
+        capture_bytes(s, n);
+        return;
+    }
+
     while (*s) {
         if (s[0] == '\\' && s[1] == 'c' && s[2] == ':') {
             const char *p = s + 3;
-            int n = 0;
-            while (p[n] && p[n] != '|' && n < 16) n++;
-            if (p[n] == '|') {
-                int idx = color_index(p, n);
+            int len = 0;
+            while (p[len] && p[len] != '|' && len < 16) len++;
+            if (p[len] == '|') {
+                int idx = color_index(p, len);
                 if (idx >= 0) fb_setcolor(idx, cur_bg);
-                s = p + n + 1;
+                s = p + len + 1;
                 continue;
             }
         }
-        fb_putc((unsigned char)*s++);
+        putc_inner((unsigned char)*s++);
     }
     fb_flush();
 }

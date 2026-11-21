@@ -50,5 +50,7 @@ void fb_clearline(int row);
 void fb_console_clear(void);
 void fb_flush(void);
 void fb_scroll(void);
+void fb_capture_set(void *buf, unsigned int cap);
+unsigned int fb_capture_len(void);
 
 #endif

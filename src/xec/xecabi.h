@@ -46,6 +46,11 @@ uint64_t time_uptime_ms(void);
 int kbd_getline(char *buf, int max);
 int kbd_getc(void);
 
+/* Redirect all TTY writes into a caller-owned buffer.  The buffer stores raw
+ * bytes, including \c:COLOR| markup, and is reset by tty_capture_set(). */
+void tty_capture_set(void *buf, unsigned int cap);
+unsigned int tty_capture_len(void);
+
 int audio_probe(void);
 int audio_play(int backend, const void *pcm, uint32_t frames,
                uint32_t rate, uint32_t channels);

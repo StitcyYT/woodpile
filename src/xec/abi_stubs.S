@@ -57,3 +57,6 @@ STUB gfx_text,        37
 
 STUB mouse_state,     38
 STUB kbd_scancode,    39
+
+STUB tty_capture_set, 40
+STUB tty_capture_len, 41

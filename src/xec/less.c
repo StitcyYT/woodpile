@@ -26,10 +26,18 @@ int xec_entry(const xec_args_t *args) {
     const void *raw = 0;
     uint32_t size = 0;
     if (fs_read(path, &raw, &size) != 0) {
-        tty_puts("\\c:RED|less: cannot open ");
-        tty_puts(path);
-        tty_putc('\n');
-        return 1;
+        /* Accept a root-relative name too.  A file can live at /file.txt
+         * while the shell cwd is sys32, and requiring /file.txt explicitly
+         * is needlessly strict. */
+        if (args->argv[1][0] != '/' &&
+            fs_read(args->argv[1], &raw, &size) == 0) {
+            /* loaded from root */
+        } else {
+            tty_puts("\\c:RED|less: cannot open ");
+            tty_puts(path);
+            tty_putc('\n');
+            return 1;
+        }
     }
 
     static char text[8192];
