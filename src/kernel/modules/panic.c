@@ -288,12 +288,20 @@ void panic_worst(const char *reason, uint32_t code, uint64_t dump) {
 
 void panic_trigger(unsigned int level) {
     switch (level) {
-        case 1:
-            panic("page fault (triggered)", 0, 0x000000000FFFFFFFULL);
+        case 1: {
+            /* Real #PF: canonical but unmapped.  The IDT handler reports CR2
+             * in the dump and uses the full styled writer. */
+            volatile uint32_t *bad = (volatile uint32_t *)0x00000000DEADBEEFULL;
+            *bad = 0x12345678u;
             break;
-        case 2:
-            panic_severe("kernel memory fault", 0x0E, 0x000000000FFFFFFFULL);
+        }
+        case 2: {
+            /* Real #GP from a noncanonical kernel access.  IDT routes GP to
+             * panic_severe(), so this is the genuine [!] kernel memory fault. */
+            volatile uint64_t *bad = (volatile uint64_t *)0x0000800000000000ULL;
+            *bad = 0x0123456789ABCDEFULL;
             break;
+        }
         case 3:
             panic_worst("sysrq rcrq (triggered)", 0, 0x000000000FFFFFFFULL);
             break;

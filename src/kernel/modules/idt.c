@@ -55,13 +55,15 @@ static void exc_handler(regs_t *r) {
 
     const char *reason = (r->int_no < 32) ? exc_reasons[r->int_no]
                                           : "unknown exception";
-    /* A double fault or stack fault may mean the stack/context is broken;
-     * skip the full framebuffer painter and use the tiny serial-first path. */
-    if (r->int_no == 8 || r->int_no == 12)
-        panic_severe(reason, r->err_code, r->rip);
-
     /* For a page fault the faulting address is the most useful dump value. */
     uint64_t dump = (r->int_no == 14) ? cr2 : r->rip;
+
+    /* Double/stack faults and kernel memory faults (noncanonical #GP) get the
+     * tiny serial-first writer: the context that caused them may be broken. */
+    if (r->int_no == 13) reason = "kernel memory fault";
+    if (r->int_no == 8 || r->int_no == 12 || r->int_no == 13)
+        panic_severe(reason, r->err_code, dump);
+
     panic(reason, r->err_code, dump);
 }
 
