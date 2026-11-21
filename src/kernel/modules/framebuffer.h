@@ -30,6 +30,8 @@ void fb_putchar(int x, int y, char c, unsigned int fg, unsigned int bg);
 void fb_drawstr(int x, int y, const char *s, unsigned int fg, unsigned int bg);
 void fb_clear(unsigned int color);
 void fb_rect(int x, int y, int w, int h, unsigned int color);
+/* Nearest-neighbour stretch of a 24-bit RGB buffer over the whole screen. */
+void fb_blit_scaled_rgb(const unsigned char *rgb, int src_w, int src_h);
 void fb_printk(const char *s);
 void fb_cursor_blink(void);
 

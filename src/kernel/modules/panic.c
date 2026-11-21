@@ -1,6 +1,7 @@
 #include "panic.h"
 #include "framebuffer.h"
 #include "serial.h"
+#include "initramfs.h"
 
 #define VGA_ADDR    ((volatile uint16_t *)0xB8000)
 #define VGA_COLS    80
@@ -9,7 +10,8 @@
 #define LINE_MAX    128
 #define RULE_LEN    88
 
-/* 0 = no panic, 1 = full panic writer running, 2 = severe writer / halted. */
+/* 0 = no panic, 1 = full writer, 2 = severe writer, 3 = wallpaper writer.
+ * Anything >= 2 is terminal: a fault inside those writers just halts. */
 static volatile int panic_state;
 
 static int str_len(const char *s) {
@@ -195,7 +197,7 @@ static void halt_forever(void) {
 
 void panic_severe(const char *reason, uint32_t code, uint64_t dump) {
     __asm__ volatile ("cli");
-    if (panic_state == 2) halt_forever();
+    if (panic_state >= 2) halt_forever();
     panic_state = 2;
 
     char l1[LINE_MAX], l2[LINE_MAX], l3[LINE_MAX], l4[LINE_MAX], l5[LINE_MAX];
@@ -232,4 +234,70 @@ void panic(const char *reason, uint32_t code, uint64_t dump) {
 
     panic_state = 2;
     halt_forever();
+}
+
+static void emit_worst_serial(const char *reason, uint64_t dump) {
+    char hbuf[17];
+    serial_puts("[!!] kernel panic\n");
+    serial_puts("dump:0x");
+    hex_fixed(hbuf, dump, 16);
+    serial_puts(hbuf);
+    serial_puts("\nreason: ");
+    serial_puts(reason ? reason : "unknown");
+    serial_puts("\nwallpaper: assets/wpreload.raw\n");
+    serial_puts("kernel panic [!!]\n");
+}
+
+void panic_worst(const char *reason, uint32_t code, uint64_t dump) {
+    __asm__ volatile ("cli");
+    if (panic_state >= 2) halt_forever();
+    panic_state = 3;
+
+    (void)code;
+    emit_worst_serial(reason, dump);
+
+    int drawn = 0;
+    if (fb_usable()) {
+        /* Read the raw blob straight from the initramfs: the worst panic
+         * must not depend on VFS slots/data-pool limits being available. */
+        initramfs_file_t *file = initramfs_find("assets/wpreload.raw");
+        if (file && file->data && file->data_len >= 8) {
+            const unsigned char *b = file->data;
+            uint32_t size = file->data_len;
+            uint32_t w = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+                         ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
+            uint32_t h = (uint32_t)b[4] | ((uint32_t)b[5] << 8) |
+                         ((uint32_t)b[6] << 16) | ((uint32_t)b[7] << 24);
+            uint64_t need = 8ULL + (uint64_t)w * h * 3ULL;
+            if (w > 0 && h > 0 && need <= size) {
+                fb_blit_scaled_rgb(b + 8, (int)w, (int)h);
+                drawn = 1;
+            }
+        }
+    }
+
+    if (!drawn) {
+        char l1[LINE_MAX], l2[LINE_MAX], l3[LINE_MAX], l4[LINE_MAX], l5[LINE_MAX];
+        build_severe_lines(reason, code, dump, l1, l2, l3, l4, l5);
+        if (fb_usable())
+            fb_severe(l1, l2, l3, l4, l5);
+        vga_severe(l1, l2, l3, l4, l5);
+    }
+    halt_forever();
+}
+
+void panic_trigger(unsigned int level) {
+    switch (level) {
+        case 1:
+            panic("page fault (triggered)", 0, 0x000000000FFFFFFFULL);
+            break;
+        case 2:
+            panic_severe("kernel memory fault", 0x0E, 0x000000000FFFFFFFULL);
+            break;
+        case 3:
+            panic_worst("sysrq rcrq (triggered)", 0, 0x000000000FFFFFFFULL);
+            break;
+        default:
+            break;
+    }
 }

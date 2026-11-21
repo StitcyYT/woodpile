@@ -51,6 +51,9 @@ int kbd_getc(void);
 void tty_capture_set(void *buf, unsigned int cap);
 unsigned int tty_capture_len(void);
 
+/* Trigger panic paths from qnt for testing: 1=pf, 2=kmf, 3=sysrq wallpaper. */
+void panic_trigger(unsigned int level);
+
 int audio_probe(void);
 int audio_play(int backend, const void *pcm, uint32_t frames,
                uint32_t rate, uint32_t channels);

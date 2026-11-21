@@ -110,6 +110,25 @@ void fb_rect(int x, int y, int w, int h, unsigned int color) {
     }
 }
 
+void fb_blit_scaled_rgb(const unsigned char *rgb, int src_w, int src_h) {
+    if (!fb_valid || !fb || !rgb || src_w <= 0 || src_h <= 0) return;
+
+    for (int y = 0; y < fb_h; y++) {
+        int sy = (int)(((long long)y * src_h) / fb_h);
+        const unsigned char *src = rgb + (long long)sy * src_w * 3;
+        unsigned int *dst = fb + (long long)y * (fb_pitch / 4);
+        for (int x = 0; x < fb_w; x++) {
+            int sx = (int)(((long long)x * src_w) / fb_w);
+            unsigned char r = src[sx * 3];
+            unsigned char g = src[sx * 3 + 1];
+            unsigned char b = src[sx * 3 + 2];
+            dst[x] = ((unsigned int)r << fb_rp) |
+                     ((unsigned int)g << fb_gp) |
+                     ((unsigned int)b << fb_bp);
+        }
+    }
+}
+
 void fb_printk(const char *s) {
     while (*s) {
         if (*s == '\n') {

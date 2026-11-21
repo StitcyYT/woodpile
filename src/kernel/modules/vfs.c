@@ -1,6 +1,7 @@
 #include "vfs.h"
 #include "initramfs.h"
 #include "serial.h"
+#include "panic.h"
 
 #define VFS_MAX_FILES   64
 #define VFS_NAME_POOL   4096
@@ -39,6 +40,150 @@ static void norm(const char *path, char *out, uint32_t max) {
     if (n >= max) n = max - 1;
     for (uint32_t i = 0; i < n; i++) out[i] = path[i];
     out[n] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
+/* Virtual procfs.  The PID space is far too large to materialise, so
+ * /sys32/proc and /sys32/proc/<pid> are synthesised on demand. */
+#define PROC_ROOT       "sys32/proc"
+#define PROC_ROOT_LEN   (sizeof(PROC_ROOT) - 1)
+#define PROC_MAX_PID    643011010u
+
+/* proc_parse() returns a leaf pointer into this buffer, so it must outlive
+ * the call.  A stack buffer here silently corrupts the leaf on return. */
+static char proc_path_name[VFS_NAME_LEN];
+
+static int proc_is_root(const char *path) {
+    char name[VFS_NAME_LEN];
+    norm(path, name, sizeof(name));
+    return streq(name, PROC_ROOT);
+}
+
+static int proc_parse(const char *path, uint32_t *pid, const char **leaf) {
+    char *name = proc_path_name;
+    norm(path, name, VFS_NAME_LEN);
+
+    const char prefix[] = PROC_ROOT "/";
+    for (unsigned int i = 0; i < PROC_ROOT_LEN; i++) {
+        if (name[i] != prefix[i]) return 0;
+    }
+    if (name[PROC_ROOT_LEN] != '/') return 0;
+
+    const char *p = name + PROC_ROOT_LEN + 1;
+    if (!*p) return 0;
+
+    uint32_t value = 0;
+    unsigned int digits = 0;
+    while (*p >= '0' && *p <= '9') {
+        value = value * 10u + (uint32_t)(*p - '0');
+        digits++;
+        p++;
+    }
+    if (!digits || value > PROC_MAX_PID || value == 0) return 0;
+    if (*p == '/') p++;
+    else if (*p) return 0;
+
+    *pid = value;
+    *leaf = p;
+    return 1;
+}
+
+static unsigned int proc_append(char *buf, unsigned int *at, uint32_t cap,
+                                const char *s) {
+    while (*s && *at + 1 < cap) buf[(*at)++] = *s++;
+    buf[*at] = 0;
+    return *at;
+}
+
+static unsigned int proc_uint(char *buf, unsigned int *at, uint32_t cap,
+                              uint32_t v) {
+    char tmp[12];
+    unsigned int n = 0;
+    if (!v) tmp[n++] = '0';
+    while (v && n < sizeof(tmp)) {
+        tmp[n++] = (char)('0' + (v % 10));
+        v /= 10;
+    }
+    while (n && *at + 1 < cap) buf[(*at)++] = tmp[--n];
+    buf[*at] = 0;
+    return *at;
+}
+
+static int proc_read(uint32_t pid, const char *leaf,
+                     const void **data, uint32_t *size) {
+    static char buf[256];
+    unsigned int n = 0;
+
+    if (streq(leaf, "uinfo")) {
+        proc_append(buf, &n, sizeof(buf), "pid=");
+        proc_uint(buf, &n, sizeof(buf), pid);
+        proc_append(buf, &n, sizeof(buf), "\nname=");
+        proc_append(buf, &n, sizeof(buf), pid == 1 ? "kernel" : "process");
+        proc_append(buf, &n, sizeof(buf), "\nstate=running\n");
+    } else if (streq(leaf, "current")) {
+        proc_append(buf, &n, sizeof(buf), "current=" PROC_ROOT "/");
+        proc_uint(buf, &n, sizeof(buf), pid);
+        proc_append(buf, &n, sizeof(buf), "\n");
+    } else if (pid == 1 && streq(leaf, "nuserhandler")) {
+        proc_append(buf, &n, sizeof(buf), "users/nuser.co\n");
+    } else if (pid == 1 && streq(leaf, "sysrq")) {
+        proc_append(buf, &n, sizeof(buf), "# write rcrq to trigger wallpaper panic\n");
+    } else {
+        return -1;
+    }
+
+    *data = buf;
+    *size = n;
+    return 0;
+}
+
+static int proc_write(const char *path, const void *data, uint32_t size) {
+    char name[VFS_NAME_LEN];
+    norm(path, name, sizeof(name));
+    if (!streq(name, PROC_ROOT "/1/sysrq")) return -1;
+
+    const unsigned char *b = (const unsigned char *)data;
+    if (!b || size < 4) return -1;
+    if (b[0] == 'r' && b[1] == 'c' && b[2] == 'r' && b[3] == 'q') {
+        panic_worst("sysrq rcrq", 0, 0x000000000FFFFFFFULL);
+        return 0;               /* never reached */
+    }
+    return -1;
+}
+
+static int proc_read_path(const char *path,
+                          const void **data, uint32_t *size) {
+    uint32_t pid;
+    const char *leaf;
+    if (!proc_parse(path, &pid, &leaf)) return -1;
+    return proc_read(pid, leaf, data, size);
+}
+
+static int proc_is_dir(const char *path) {
+    if (proc_is_root(path)) return 1;
+    uint32_t pid;
+    const char *leaf;
+    return proc_parse(path, &pid, &leaf) && !leaf[0];
+}
+
+static int proc_list(const char *path, char *buf, uint32_t bufsize) {
+    unsigned int n = 0;
+    if (proc_is_root(path)) {
+        proc_append(buf, &n, bufsize, "1/\n2/\n3/\n...\n643011010/\n");
+        return 5;
+    }
+
+    uint32_t pid;
+    const char *leaf;
+    if (!proc_parse(path, &pid, &leaf) || leaf[0]) return -1;
+
+    proc_append(buf, &n, bufsize, "uinfo\ncurrent\n");
+    int count = 2;
+    if (pid == 1) {
+        proc_append(buf, &n, bufsize, "sysrq\nnuserhandler\n");
+        count += 2;
+    }
+    return count;
 }
 
 void vfs_init(void) {
@@ -88,6 +233,8 @@ static vfs_entry_t *vfs_find(const char *path) {
 }
 
 int vfs_read(const char *path, const void **data, uint32_t *size) {
+    if (proc_read_path(path, data, size) == 0) return 0;
+
     vfs_entry_t *e = vfs_find(path);
     if (!e) return -1;
     *data = e->data;
@@ -96,6 +243,8 @@ int vfs_read(const char *path, const void **data, uint32_t *size) {
 }
 
 int vfs_write(const char *path, const void *data, uint32_t size) {
+    if (proc_write(path, data, size) == 0) return 0;
+
     char name[VFS_NAME_LEN];
     norm(path, name, sizeof(name));
     if (!name[0]) return -1;
@@ -152,6 +301,8 @@ static void add_unique(char list[VFS_MAX_LIST][VFS_NAME_LEN], int *count, const 
 
 /* A directory exists only if some file lives below it. */
 int vfs_is_dir(const char *path) {
+    if (proc_is_dir(path)) return 1;
+
     char base[VFS_NAME_LEN];
     norm(path, base, sizeof(base));
     if (!base[0]) return 1;                 /* root always exists */
@@ -175,6 +326,9 @@ int vfs_list(const char *dir, char *buf, uint32_t bufsize) {
     norm(dir, base, sizeof(base));
 
     if (base[0] && !vfs_is_dir(base)) return -1;
+
+    int proc_count = proc_list(base, buf, bufsize);
+    if (proc_count >= 0) return proc_count;
 
     static char list[VFS_MAX_LIST][VFS_NAME_LEN];
     int count = 0;

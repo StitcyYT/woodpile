@@ -89,6 +89,7 @@ static void print_help(const qnt_io_t *io) {
     emit(io, "\\c:GREEN|  rmf <file>    remove file\n");
     emit(io, "\\c:GREEN|  inf           system information\n");
     emit(io, "\\c:GREEN|  less <file>   view a file\n");
+    emit(io, "\\c:GREEN|  bat <file>    print a file like cat\n");
     emit(io, "\\c:GREEN|  rplay <file>  play RPLAY3 audio\n");
     emit(io, "\\c:GREEN|  x8            start the X8 window session\n");
     emit(io, "\\c:GREEN|  snake         X8 snake game\n");
@@ -96,7 +97,10 @@ static void print_help(const qnt_io_t *io) {
     emit(io, "\\c:GREEN|  paint         X8 paint program\n");
     emit(io, "\\c:GREEN|  notepad       X8 note pad\n");
     emit(io, "\\c:GREEN|  cd [dir]      change directory\n");
+    emit(io, "\\c:GREEN|  echo text > file   write text to a file\n");
     emit(io, "\\c:GREEN|  clear         clear screen\n");
+    emit(io, "\\c:GREEN|  pf            trigger a page-fault panic\n");
+    emit(io, "\\c:GREEN|  kmf           trigger a kernel-memory-fault panic\n");
     emit(io, "\\c:GREEN|  help          this list\n");
     emit(io, "\\c:GREEN|  exit          stop the shell\n");
     emit(io, "\\c:GRAY|");
@@ -139,6 +143,22 @@ static void command_path(const char *name, char *out) {
     out[n] = '\0';
 }
 
+static void resolve_path(const char *name, char *out, unsigned int max) {
+    unsigned int n = 0;
+    if (name[0] == '/') {
+        while (name[n] && n + 1 < max) { out[n] = name[n]; n++; }
+        out[n] = '\0';
+        return;
+    }
+    if (cwd[0]) {
+        n = 0;
+        while (cwd[n] && n + 1 < max) { out[n] = cwd[n]; n++; }
+        if (n > 0 && out[n - 1] != '/' && n + 1 < max) out[n++] = '/';
+    }
+    for (unsigned int i = 0; name[i] && n + 1 < max; i++) out[n++] = name[i];
+    out[n] = '\0';
+}
+
 int qnt_core_execute(const char *line, const qnt_io_t *io) {
     const char *argv[16];
     unsigned int argc = 0;
@@ -149,12 +169,40 @@ int qnt_core_execute(const char *line, const qnt_io_t *io) {
     copy[n] = '\0';
 
     char *p = copy;
-    while (*p && argc < 16) {
+    char *redirect = 0;
+    while (*p) {
         while (*p == ' ' || *p == '\t') p++;
         if (!*p) break;
-        argv[argc++] = p;
-        while (*p && *p != ' ' && *p != '\t') p++;
-        if (*p) *p++ = '\0';
+        if (argc >= 16) break;
+
+        if (*p == '>') {
+            p++;
+            while (*p == ' ' || *p == '\t') p++;
+            if (!*p) break;
+            redirect = p;
+            while (*p && *p != ' ' && *p != '\t') p++;
+            if (*p) *p++ = '\0';
+            continue;
+        }
+
+        char *start = p;
+        if (*p == '"' || *p == '\'') {
+            char quote = *p++;
+            start = p;
+            while (*p && *p != quote) p++;
+            if (*p == quote) {
+                *p = '\0';
+                p++;
+            }
+        } else {
+            while (*p && *p != ' ' && *p != '\t' && *p != '>') p++;
+            if (*p == '>') {
+                *p = '\0';              /* leave '>' for the next pass */
+            } else if (*p) {
+                *p++ = '\0';
+            }
+        }
+        argv[argc++] = start;
     }
 
     if (argc == 0) return 0;
@@ -174,6 +222,42 @@ int qnt_core_execute(const char *line, const qnt_io_t *io) {
     if (str_eq(argv[0], "exit")) {
         emit(io, "\\c:GRAY|\n");
         return 1;
+    }
+    if (str_eq(argv[0], "pf")) {
+        panic_trigger(1);
+        return 0;
+    }
+    if (str_eq(argv[0], "kmf")) {
+        panic_trigger(2);
+        return 0;
+    }
+    if (str_eq(argv[0], "echo")) {
+        char message[256];
+        unsigned int m = 0;
+        for (unsigned int i = 1; i < argc; i++) {
+            if (m && m + 1 < sizeof(message)) message[m++] = ' ';
+            for (unsigned int j = 0; argv[i][j] && m + 1 < sizeof(message); j++)
+                message[m++] = argv[i][j];
+        }
+        message[m] = '\0';
+
+        if (redirect) {
+            char path[128];
+            resolve_path(redirect, path, sizeof(path));
+            if (fs_write(path, message, m) != 0) {
+                emit(io, "\\c:RED|echo: cannot write ");
+                emit(io, path);
+                emitc(io, '\n');
+            }
+        } else {
+            emit(io, message);
+            emitc(io, '\n');
+        }
+        return 0;
+    }
+    if (redirect) {
+        emit(io, "\\c:RED|qnt: redirection is only supported by echo\n");
+        return 0;
     }
 
     char path[128];

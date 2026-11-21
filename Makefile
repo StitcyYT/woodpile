@@ -31,7 +31,7 @@ OBJS = $(BUILD)/entry.o $(BUILD)/start.o $(BUILD)/vga_testing.o $(BUILD)/font.o 
 
 XECS = $(BUILD)/qnt.xec $(BUILD)/tbi.xec $(BUILD)/lid.xec \
        $(BUILD)/rmf.xec $(BUILD)/inf.xec $(BUILD)/less.xec \
-       $(BUILD)/rplay.xec
+       $(BUILD)/rplay.xec $(BUILD)/bat.xec
 QNT_CORE_OBJ = $(BUILD)/qnt_core.o
 RPLAY_SRC ?= $(HOME)/Documents/Codex/2026-10-23/what-x20
 MEDIA = $(BUILD)/media
@@ -49,6 +49,8 @@ X8_LIB_OBJS = $(BUILD)/x8.o $(BUILD)/x8_winapi.o $(BUILD)/x8_cursor.o \
               $(BUILD)/x8_shell.o
 X8_CURSORS = $(wildcard assets/cursors/*)
 X8_ICONS = $(wildcard assets/icons/*.ico)
+WPRELOAD_PNG = assets/wpreload.png
+WPRELOAD_RAW = $(BUILD)/wpreload.raw
 
 all: $(BUILD)/os.img
 
@@ -172,6 +174,7 @@ $(eval $(call XEC_RULE,rmf,0x930000))
 $(eval $(call XEC_RULE,inf,0x940000))
 $(eval $(call XEC_RULE,less,0x950000))
 $(eval $(call XEC_RULE,rplay,0x960000))
+$(eval $(call XEC_RULE,bat,0x970000))
 
 # ---- X8: a tiny framebuffer window session and its bundled apps ----
 $(BUILD)/games $(BUILD)/games/ $(BUILD)/progs $(BUILD)/progs/:
@@ -221,16 +224,22 @@ $(eval $(call X8_XEC_RULE,$(BUILD)/progs/term.xec,$(X8_SRC)/progs/term.c,0x15000
 $(MEDIA): tools/rplay_prep.py
 	python3 tools/rplay_prep.py $(RPLAY_SRC) $@
 
+# Kernel panic wallpaper: decode once at build time, stretch at runtime.
+$(WPRELOAD_RAW): $(WPRELOAD_PNG) tools/png_to_raw.py
+	python3 tools/png_to_raw.py $< $@
+
 # ---- initramfs staging ----
-$(INITRD): $(XECS) $(X8_XECS) $(MEDIA) assets/cursors assets/icons
+$(INITRD): $(XECS) $(X8_XECS) $(MEDIA) $(WPRELOAD_RAW) $(WPRELOAD_PNG) assets/cursors assets/icons
 	rm -rf $@
 	mkdir -p $@
 	cp -a initramfs/. $@/
 	rm -f $@/sys32/boot16.co $@/sys32/run64.co $@/sys32/att.co \
 	      $@/users/nuser.so $@/boot/floader.conf
 	rm -rf $@/boot $@/users/nuser $@/assets
-	mkdir -p $@/sys32/bin $@/sys32/lib/cursors $@/media $@/games $@/progs
+	mkdir -p $@/sys32/bin $@/sys32/lib/cursors $@/media $@/games $@/progs $@/assets
 	cp -a $(MEDIA)/. $@/media/
+	cp $(WPRELOAD_PNG) $@/assets/
+	cp $(WPRELOAD_RAW) $@/assets/
 	cp -a assets/cursors/. $@/sys32/lib/cursors/
 	mkdir -p $@/sys32/icons
 	cp $(X8_ICONS) $@/sys32/icons/

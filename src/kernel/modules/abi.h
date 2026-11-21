@@ -56,6 +56,8 @@ enum {
     ABI_TTY_CAPTURE_SET,
     ABI_TTY_CAPTURE_LEN,
 
+    ABI_PANIC_TRIGGER,
+
     ABI_COUNT
 };
 

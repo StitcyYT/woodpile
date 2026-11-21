@@ -7,6 +7,7 @@
 #include "kbd.h"
 #include "mouse.h"
 #include "audio.h"
+#include "panic.h"
 
 static volatile uint64_t *const table = (volatile uint64_t *)WP_ABI_BASE;
 
@@ -67,4 +68,6 @@ void abi_init(void) {
 
     put(ABI_TTY_CAPTURE_SET, (void *)&fb_capture_set);
     put(ABI_TTY_CAPTURE_LEN, (void *)&fb_capture_len);
+
+    put(ABI_PANIC_TRIGGER, (void *)&panic_trigger);
 }
